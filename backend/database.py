@@ -19,7 +19,7 @@ class DatabaseManager:
     """MSSQL veritabanı yönetim sınıfı"""
 
     def __init__(self):
-        self.connection_string = Config.get_connection_string
+        self.connection_string = Config().get_connection_string
         self._connection = None
 
     @contextmanager
@@ -114,12 +114,12 @@ class DatabaseManager:
             logger.error(f"Sorgu hatası: {str(e)}")
             raise
 
-    def call_sp_soru_cevap(self, kullanici_id: int, soru: str) -> Dict[str, Any]:
+    def call_sp_soru_cevap(self, tc_kimlik_no: str, soru: str) -> Dict[str, Any]:
         """
-        sp_SoruCevap stored procedure'ünü çağırır
+        SP_SoruCevap stored procedure'ünü çağırır
 
         Args:
-            kullanici_id: Kullanıcı ID
+            tc_kimlik_no: TC Kimlik No
             soru: Kullanıcının sorusu
 
         Returns:
@@ -129,86 +129,108 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
-                # OUTPUT parametreleri
-                cevap = ""
-                soru_tur_kod = ""
-                soru_tur_id = 0
-
-                # Stored procedure çağrısı
-                result = cursor.execute(
-                    "{CALL sp_SoruCevap (?, ?, ?, ?, ?)}",
-                    (kullanici_id, soru, cevap, soru_tur_kod, soru_tur_id)
-                )
-
-                # OUTPUT parametrelerini al
-                cursor.nextset()  # Sonraki result set'e geç
-
-                # Alternatif yöntem: SELECT ile OUTPUT parametrelerini al
                 cursor.execute("""
                     DECLARE @Cevap NVARCHAR(MAX)
                     DECLARE @SoruTurKod NVARCHAR(50)
-                    DECLARE @SoruTurId INT
 
-                    EXEC sp_SoruCevap ?, ?, @Cevap OUTPUT, @SoruTurKod OUTPUT, @SoruTurId OUTPUT
+                    EXEC SP_SoruCevap ?, ?, @Cevap OUTPUT, @SoruTurKod OUTPUT
 
-                    SELECT @Cevap AS Cevap, @SoruTurKod AS SoruTurKod, @SoruTurId AS SoruTurId
-                """, (kullanici_id, soru))
+                    SELECT @Cevap AS Cevap, @SoruTurKod AS SoruTurKod
+                """, (tc_kimlik_no, soru))
 
                 result = cursor.fetchone()
 
                 return {
                     'cevap': result.Cevap if result else None,
                     'soru_tur_kod': result.SoruTurKod if result else None,
-                    'soru_tur_id': result.SoruTurId if result else None,
-                    'kullanici_id': kullanici_id,
+                    'tc_kimlik_no': tc_kimlik_no,
                     'soru': soru
                 }
 
         except Exception as e:
-            logger.error(f"sp_SoruCevap hatası: {str(e)}")
+            logger.error(f"SP_SoruCevap hatası: {str(e)}")
             raise
 
-    def call_sp_kullanici_giris(self, kullanici_adi: str, sifre_hash: str) -> Tuple[Optional[int], bool]:
+    def call_sp_soru_cevap_v2(self, tc_kimlik_no: str, soru: str,
+                               soru_tur_kod: str, parametreler_json: str) -> Dict[str, Any]:
         """
-        sp_KullaniciGiris stored procedure'ünü çağırır
+        SP_SoruCevap_V2 stored procedure'ünü çağırır (JSON parametrelerle)
 
         Args:
-            kullanici_adi: Kullanıcı adı
-            sifre_hash: Şifre hash'i
+            tc_kimlik_no: TC Kimlik No
+            soru: Kullanıcının sorusu
+            soru_tur_kod: Soru türü kodu (ChatGPT'den)
+            parametreler_json: Parametreler JSON formatında
 
         Returns:
-            (kullanici_id, basarili) tuple'ı
+            Cevap bilgileri içeren dictionary
         """
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
                 cursor.execute("""
-                    DECLARE @KullaniciId INT
+                    DECLARE @Cevap NVARCHAR(MAX)
+
+                    EXEC SP_SoruCevap_V2 ?, ?, ?, ?, @Cevap OUTPUT
+
+                    SELECT @Cevap AS Cevap
+                """, (tc_kimlik_no, soru, soru_tur_kod, parametreler_json))
+
+                result = cursor.fetchone()
+
+                return {
+                    'cevap': result.Cevap if result else None,
+                    'soru_tur_kod': soru_tur_kod,
+                    'tc_kimlik_no': tc_kimlik_no,
+                    'soru': soru,
+                    'parametreler': parametreler_json
+                }
+
+        except Exception as e:
+            logger.error(f"SP_SoruCevap_V2 hatası: {str(e)}")
+            raise
+
+    def call_sp_kullanici_giris(self, tc_kimlik_no: str, sifre: str) -> bool:
+        """
+        SP_KullaniciGiris stored procedure'ünü çağırır
+
+        Args:
+            tc_kimlik_no: TC Kimlik No
+            sifre: Şifre (plain text)
+
+        Returns:
+            Başarılı ise True
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
                     DECLARE @Basarili BIT
 
-                    EXEC sp_KullaniciGiris ?, ?, @KullaniciId OUTPUT, @Basarili OUTPUT
+                    EXEC SP_KullaniciGiris ?, ?, @Basarili OUTPUT
 
-                    SELECT @KullaniciId AS KullaniciId, @Basarili AS Basarili
-                """, (kullanici_adi, sifre_hash))
+                    SELECT @Basarili AS Basarili
+                """, (tc_kimlik_no, sifre))
 
                 result = cursor.fetchone()
 
                 if result:
-                    return (result.KullaniciId, bool(result.Basarili))
+                    return bool(result.Basarili)
                 else:
-                    return (None, False)
+                    return False
 
         except Exception as e:
-            logger.error(f"sp_KullaniciGiris hatası: {str(e)}")
-            return (None, False)
+            logger.error(f"SP_KullaniciGiris hatası: {str(e)}")
+            return False
 
-    def get_sohbet_gecmisi(self, kullanici_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_sohbet_gecmisi(self, tc_kimlik_no: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
         Kullanıcının sohbet geçmişini getirir
 
         Args:
-            kullanici_id: Kullanıcı ID
+            tc_kimlik_no: TC Kimlik No
             limit: Maksimum kayıt sayısı
 
         Returns:
@@ -218,7 +240,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
-                cursor.execute("EXEC sp_SohbetGecmisiGetir ?, ?", (kullanici_id, limit))
+                cursor.execute("EXEC SP_SohbetGecmisiGetir ?, ?", (tc_kimlik_no, limit))
 
                 columns = [column[0] for column in cursor.description]
                 results = []
@@ -232,49 +254,99 @@ class DatabaseManager:
             logger.error(f"Sohbet geçmişi getirme hatası: {str(e)}")
             raise
 
-    def get_kullanici_by_id(self, kullanici_id: int) -> Optional[Dict[str, Any]]:
+    def get_sohbet_gecmisi_by_session(self, tc_kimlik_no: str, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
-        Kullanıcı bilgilerini ID ile getirir
+        Kullanıcının belirli bir session'a ait sohbet geçmişini getirir
 
         Args:
-            kullanici_id: Kullanıcı ID
+            tc_kimlik_no: TC Kimlik No
+            session_id: Session ID
+            limit: Maksimum kayıt sayısı
 
         Returns:
-            Kullanıcı bilgileri
+            Session'a ait sohbet geçmişi listesi
         """
-        query = """
-            SELECT Id, KullaniciAdi, Eposta, KayitTarihi, AktifMi
-            FROM KULLANICILAR
-            WHERE Id = ? AND AktifMi = 1
-        """
-        results = self.execute_query(query, (kullanici_id,))
-        return results[0] if results else None
+        try:
+            query = """
+                SELECT TOP (?)
+                    Id, Soru, Cevap, Tarih, SoruTurId, SessionId
+                FROM SOHBETLER
+                WHERE TcKimlikNo = ? AND SessionId = ?
+                ORDER BY Tarih DESC
+            """
+            return self.execute_query(query, (limit, tc_kimlik_no, session_id))
 
-    def get_kullanici_by_username(self, kullanici_adi: str) -> Optional[Dict[str, Any]]:
+        except Exception as e:
+            logger.error(f"Session sohbet geçmişi getirme hatası: {str(e)}")
+            raise
+
+    def get_sessions_list(self, tc_kimlik_no: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
-        Kullanıcı bilgilerini kullanıcı adı ile getirir
+        Kullanıcının sohbet session'larını listeler
 
         Args:
-            kullanici_adi: Kullanıcı adı
+            tc_kimlik_no: TC Kimlik No
+            limit: Maksimum session sayısı
 
         Returns:
-            Kullanıcı bilgileri
+            Session listesi (ilk mesaj, tarih, mesaj sayısı ile)
+        """
+        try:
+            query = """
+                SELECT TOP (?)
+                    SessionId,
+                    MIN(Tarih) AS IlkMesajTarihi,
+                    MAX(Tarih) AS SonMesajTarihi,
+                    COUNT(*) AS MesajSayisi,
+                    (SELECT TOP 1 Soru FROM SOHBETLER WHERE TcKimlikNo = s.TcKimlikNo AND SessionId = s.SessionId ORDER BY Tarih ASC) AS IlkSoru
+                FROM SOHBETLER s
+                WHERE TcKimlikNo = ? AND SessionId IS NOT NULL
+                GROUP BY SessionId, TcKimlikNo
+                ORDER BY MAX(Tarih) DESC
+            """
+            return self.execute_query(query, (limit, tc_kimlik_no))
+
+        except Exception as e:
+            logger.error(f"Session listesi getirme hatası: {str(e)}")
+            raise
+
+    def get_calisan_by_tc(self, tc_kimlik_no: str) -> Optional[Dict[str, Any]]:
+        """
+        Çalışan bilgilerini TC Kimlik No ile getirir (KNS_IK.dbo.Calisan)
+        ADMIN_KULLANICILAR tablosundan admin kontrolü yapar
+
+        Args:
+            tc_kimlik_no: TC Kimlik No
+
+        Returns:
+            Çalışan bilgileri (AdminMi alanı dahil)
         """
         query = """
-            SELECT Id, KullaniciAdi, SifreHash, Eposta, KayitTarihi, AktifMi
-            FROM KULLANICILAR
-            WHERE KullaniciAdi = ? AND AktifMi = 1
+            SELECT
+                c.Id,
+                c.TcKimlikNo,
+                c.Adi + ' ' + c.Soyadi AS AdSoyad,
+                COALESCE(c.IsEposta, c.Eposta) AS Eposta,
+                c.DepartmanId AS Departman,
+                c.AktifMi,
+                CASE
+                    WHEN a.TcKimlikNo IS NOT NULL AND a.AktifMi = 1 THEN 1
+                    ELSE 0
+                END AS AdminMi
+            FROM KNS_IK.dbo.Calisan c
+            LEFT JOIN ADMIN_KULLANICILAR a ON c.TcKimlikNo = a.TcKimlikNo
+            WHERE c.TcKimlikNo = ? AND c.AktifMi = 1
         """
-        results = self.execute_query(query, (kullanici_adi,))
+        results = self.execute_query(query, (tc_kimlik_no,))
         return results[0] if results else None
 
-    def add_islem_log(self, kullanici_id: Optional[int], islem: str,
+    def add_islem_log(self, tc_kimlik_no: Optional[str], islem: str,
                       detay: Optional[str] = None, hata_mi: bool = False) -> bool:
         """
         İşlem logu ekler
 
         Args:
-            kullanici_id: Kullanıcı ID (opsiyonel)
+            tc_kimlik_no: TC Kimlik No (opsiyonel)
             islem: İşlem açıklaması
             detay: Detay bilgisi (opsiyonel)
             hata_mi: Hata durumu
@@ -284,10 +356,10 @@ class DatabaseManager:
         """
         try:
             query = """
-                INSERT INTO ISLEM_LOG (KullaniciId, Islem, Detay, Tarih, HataMi)
+                INSERT INTO ISLEM_LOG (TcKimlikNo, Islem, Detay, Tarih, HataMi)
                 VALUES (?, ?, ?, GETDATE(), ?)
             """
-            self.execute_non_query(query, (kullanici_id, islem, detay, hata_mi))
+            self.execute_non_query(query, (tc_kimlik_no, islem, detay, hata_mi))
             return True
         except Exception as e:
             logger.error(f"Log ekleme hatası: {str(e)}")
@@ -330,6 +402,168 @@ class DatabaseManager:
                 ORDER BY ST.Kod, SE.OrnekSoru
             """
             return self.execute_query(query)
+
+    # ============================================
+    # DASHBOARD İSTATİSTİKLERİ
+    # ============================================
+
+    def get_usage_statistics(self) -> Dict[str, Any]:
+        """
+        Genel kullanım istatistiklerini getirir
+
+        Returns:
+            Kullanım istatistikleri
+        """
+        try:
+            query = """
+                SELECT
+                    COUNT(DISTINCT TcKimlikNo) AS ToplamKullanici,
+                    COUNT(DISTINCT SessionId) AS ToplamSession,
+                    COUNT(*) AS ToplamMesaj,
+                    COUNT(DISTINCT CAST(Tarih AS DATE)) AS AktifGunSayisi
+                FROM SOHBETLER
+                WHERE Tarih >= DATEADD(MONTH, -1, GETDATE())
+            """
+            result = self.execute_query(query)
+            return result[0] if result else {}
+
+        except Exception as e:
+            logger.error(f"Kullanım istatistikleri hatası: {str(e)}")
+            return {}
+
+    def get_top_questions(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        En çok sorulan soruları getirir
+
+        Args:
+            limit: Maksimum kayıt sayısı
+
+        Returns:
+            En çok sorulan sorular listesi
+        """
+        try:
+            query = """
+                SELECT TOP (?)
+                    Soru,
+                    COUNT(*) AS SoruSayisi,
+                    MAX(Tarih) AS SonSoruTarihi
+                FROM SOHBETLER
+                WHERE Tarih >= DATEADD(MONTH, -1, GETDATE())
+                GROUP BY Soru
+                ORDER BY COUNT(*) DESC
+            """
+            return self.execute_query(query, (limit,))
+
+        except Exception as e:
+            logger.error(f"En çok sorulan sorular hatası: {str(e)}")
+            return []
+
+    def get_questions_per_user(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Kullanıcı başına soru sayısını getirir
+
+        Args:
+            limit: Maksimum kullanıcı sayısı
+
+        Returns:
+            Kullanıcı başına soru sayısı listesi
+        """
+        try:
+            query = """
+                SELECT TOP (?)
+                    s.TcKimlikNo,
+                    c.Adi + ' ' + c.Soyadi AS AdSoyad,
+                    COUNT(*) AS SoruSayisi,
+                    MAX(s.Tarih) AS SonSoruTarihi
+                FROM SOHBETLER s
+                LEFT JOIN KNS_IK.dbo.Calisan c ON s.TcKimlikNo = c.TcKimlikNo
+                WHERE s.Tarih >= DATEADD(MONTH, -1, GETDATE())
+                GROUP BY s.TcKimlikNo, c.Adi, c.Soyadi
+                ORDER BY COUNT(*) DESC
+            """
+            return self.execute_query(query, (limit,))
+
+        except Exception as e:
+            logger.error(f"Kullanıcı başına soru sayısı hatası: {str(e)}")
+            return []
+
+    def get_success_rate(self) -> Dict[str, Any]:
+        """
+        Başarı oranını getirir (feedback tablosundan)
+
+        Returns:
+            Başarı oranı istatistikleri
+        """
+        try:
+            query = """
+                SELECT
+                    COUNT(*) AS ToplamFeedback,
+                    SUM(CASE WHEN Reaksiyon = 'positive' THEN 1 ELSE 0 END) AS OlumluFeedback,
+                    SUM(CASE WHEN Reaksiyon = 'negative' THEN 1 ELSE 0 END) AS OlumsuzFeedback,
+                    CASE
+                        WHEN COUNT(*) > 0 THEN
+                            CAST(SUM(CASE WHEN Reaksiyon = 'positive' THEN 1 ELSE 0 END) AS FLOAT) / COUNT(*) * 100
+                        ELSE 0
+                    END AS BasariOrani
+                FROM KULLANICI_FEEDBACK
+                WHERE FeedbackTarihi >= DATEADD(MONTH, -1, GETDATE())
+            """
+            result = self.execute_query(query)
+            return result[0] if result else {}
+
+        except Exception as e:
+            logger.error(f"Başarı oranı hatası: {str(e)}")
+            return {}
+
+    def get_peak_usage_times(self) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Yoğun kullanım saatlerini ve günlerini getirir
+
+        Returns:
+            Saatlik ve günlük kullanım istatistikleri
+        """
+        try:
+            # Saatlik istatistikler
+            hourly_query = """
+                SELECT
+                    DATEPART(HOUR, Tarih) AS Saat,
+                    COUNT(*) AS MesajSayisi
+                FROM SOHBETLER
+                WHERE Tarih >= DATEADD(MONTH, -1, GETDATE())
+                GROUP BY DATEPART(HOUR, Tarih)
+                ORDER BY DATEPART(HOUR, Tarih)
+            """
+            hourly_stats = self.execute_query(hourly_query)
+
+            # Günlük istatistikler (Haftalık)
+            daily_query = """
+                SELECT
+                    CASE DATEPART(WEEKDAY, Tarih)
+                        WHEN 1 THEN 'Pazar'
+                        WHEN 2 THEN 'Pazartesi'
+                        WHEN 3 THEN 'Salı'
+                        WHEN 4 THEN 'Çarşamba'
+                        WHEN 5 THEN 'Perşembe'
+                        WHEN 6 THEN 'Cuma'
+                        WHEN 7 THEN 'Cumartesi'
+                    END AS Gun,
+                    DATEPART(WEEKDAY, Tarih) AS GunNumarasi,
+                    COUNT(*) AS MesajSayisi
+                FROM SOHBETLER
+                WHERE Tarih >= DATEADD(MONTH, -1, GETDATE())
+                GROUP BY DATEPART(WEEKDAY, Tarih)
+                ORDER BY DATEPART(WEEKDAY, Tarih)
+            """
+            daily_stats = self.execute_query(daily_query)
+
+            return {
+                'hourly': hourly_stats,
+                'daily': daily_stats
+            }
+
+        except Exception as e:
+            logger.error(f"Yoğun kullanım saatleri hatası: {str(e)}")
+            return {'hourly': [], 'daily': []}
 
 
 # Test fonksiyonu

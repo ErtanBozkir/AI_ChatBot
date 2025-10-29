@@ -60,6 +60,14 @@ documents/*.xlsx
 documents/*.pptx
 !documents/.gitkeep
 
+# Uploaded Files (user data)
+uploads/
+!uploads/.gitkeep
+
+# Vector Stores (RAG embeddings)
+backend/uploads/vector_stores/
+**/vector_stores/
+
 # Test files
 test_*.py
 *_test.py

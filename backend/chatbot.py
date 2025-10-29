@@ -4,12 +4,14 @@ OpenAI ChatGPT API entegrasyonu ve yanıt üretme
 """
 
 import logging
+import json
 from typing import List, Dict, Optional, Any
 from openai import OpenAI
 
 from config import Config
 from database import DatabaseManager
 from document_reader import DocumentReader
+from question_analyzer import QuestionAnalyzer
 
 # Logging ayarları
 logging.basicConfig(level=Config.LOG_LEVEL)
@@ -22,7 +24,8 @@ class ChatBot:
     def __init__(self):
         self.db = DatabaseManager()
         self.doc_reader = DocumentReader()
-        self.client = OpenAI(api_key=Config.OPENAI_API_KEY)
+        self.analyzer = QuestionAnalyzer()
+        self.client = OpenAI(api_key=Config.OPENAI_API_KEY) if Config.OPENAI_API_KEY else None
         self.model = Config.OPENAI_MODEL
         self.temperature = Config.OPENAI_TEMPERATURE
         self.max_tokens = Config.OPENAI_MAX_TOKENS
@@ -132,19 +135,20 @@ class ChatBot:
             logger.error(f"Cevap geliştirme hatası: {str(e)}")
             return base_answer
 
-    def get_answer(self, kullanici_id: int, soru: str, sohbet_gecmisi: List[Dict[str, str]] = None) -> Dict[str, Any]:
+    def get_answer(self, tc_kimlik_no: str, soru: str, sohbet_gecmisi: List[Dict[str, str]] = None, session_id: str = None) -> Dict[str, Any]:
         """
-        Kullanıcının sorusuna cevap verir (ana fonksiyon)
+        Kullanıcının sorusuna cevap verir (ana fonksiyon) - V2 ile parametreli sorgular
 
         İş akışı:
-        1. Stored procedure'u çağır
-        2. SP'den cevap geldiyse, opsiyonel olarak ChatGPT ile geliştir
-        3. SP'den cevap gelmediyse, dokümanlardan ara
-        4. Dokümanlardan da bulunamazsa, ChatGPT'ye sor
-        5. Sonucu veritabanına kaydet
+        1. ChatGPT ile soruyu analiz et → soru türü + parametreler çıkar
+        2. SP_SoruCevap_V2 çağır (JSON parametrelerle)
+        3. SP'den cevap geldiyse, döndür
+        4. SP'den cevap gelmediyse, dokümanlardan ara
+        5. Dokümanlardan da bulunamazsa, ChatGPT ile genel cevap
+        6. Sonucu veritabanına kaydet (SP bunu otomatik yapıyor)
 
         Args:
-            kullanici_id: Kullanıcı ID
+            tc_kimlik_no: TC Kimlik No
             soru: Kullanıcının sorusu
             sohbet_gecmisi: Önceki sohbet geçmişi (opsiyonel)
 
@@ -152,48 +156,75 @@ class ChatBot:
             Cevap bilgileri
         """
         try:
-            logger.info(f"Soru alındı (Kullanıcı: {kullanici_id}): {soru}")
+            logger.info(f"Soru alındı (TC: {tc_kimlik_no}): {soru}")
 
-            # 1. STORED PROCEDURE'U ÇAĞIR
+            # 1. CHATGPT İLE SORU ANALİZİ (Soru türü + parametreler) - CONTEXT İLE
+            # Stored procedure mesajları TERS sırada getiriyor (en yeni önce), düzeltelim
+            if sohbet_gecmisi:
+                sohbet_gecmisi = list(reversed(sohbet_gecmisi))
+            analysis = self.analyzer.analyze_question(soru, tc_kimlik_no, sohbet_gecmisi)
+            soru_tur_kod = analysis.get('soru_tur_kod', 'BILINMIYOR')
+            parametreler = analysis.get('parametreler', {})
+            guven_skoru = analysis.get('guven_skoru', 0.0)
+
+            logger.info(f"Soru analizi: Tür={soru_tur_kod}, Güven={guven_skoru}, Parametreler={parametreler}")
+
+            # 2. STORED PROCEDURE V2'Yİ ÇAĞIR (JSON parametrelerle)
             sp_result = None
-            if Config.ENABLE_SP_SEARCH:
+            if Config.ENABLE_SP_SEARCH and soru_tur_kod != 'BILINMIYOR':
                 try:
-                    sp_result = self.db.call_sp_soru_cevap(kullanici_id, soru)
+                    parametreler_json = json.dumps(parametreler, ensure_ascii=False)
+                    sp_result = self.db.call_sp_soru_cevap_v2(
+                        tc_kimlik_no=tc_kimlik_no,
+                        soru=soru,
+                        soru_tur_kod=soru_tur_kod,
+                        parametreler_json=parametreler_json
+                    )
                 except Exception as e:
-                    logger.error(f"SP çağrısı hatası: {str(e)}")
+                    logger.error(f"SP_V2 çağrısı hatası: {str(e)}")
 
-            # 2. SP'DEN CEVAP VAR MI?
+            # 3. SP'DEN CEVAP VAR MI?
             if sp_result and sp_result.get('cevap'):
                 cevap = sp_result['cevap']
-                kaynak = f"Stored Procedure ({sp_result.get('soru_tur_kod', 'BILINMIYOR')})"
+                kaynak = f"Veritabanı ({soru_tur_kod})"
 
-                logger.info(f"SP'den cevap alındı: {sp_result.get('soru_tur_kod')}")
+                logger.info(f"SP'den cevap alındı: {soru_tur_kod}")
+
+                # SP cevabını da session_id ile kaydet
+                self._save_to_database(tc_kimlik_no, soru, cevap, None, session_id)
 
                 return {
                     'success': True,
                     'cevap': cevap,
                     'kaynak': kaynak,
-                    'soru_tur_kod': sp_result.get('soru_tur_kod'),
-                    'soru_tur_id': sp_result.get('soru_tur_id')
+                    'soru_tur_kod': soru_tur_kod,
+                    'parametreler': parametreler,
+                    'guven_skoru': guven_skoru
                 }
 
-            # 3. DOKÜMANLARDAN ARA
+            # 4. DOKÜMANLARDAN ARA
             doc_answer = self.get_answer_from_documents(soru)
             if doc_answer:
                 logger.info("Dokümanlardan cevap bulundu")
 
                 # Veritabanına kaydet
-                self._save_to_database(kullanici_id, soru, doc_answer, None)
+                self._save_to_database(tc_kimlik_no, soru, doc_answer, None, session_id)
 
                 return {
                     'success': True,
                     'cevap': doc_answer,
                     'kaynak': 'Dokümanlar + ChatGPT',
-                    'soru_tur_kod': 'DOKUMAN',
-                    'soru_tur_id': None
+                    'soru_tur_kod': 'DOKUMAN'
                 }
 
-            # 4. CHATGPT İLE GENEL CEVAP
+            # 5. CHATGPT İLE GENEL CEVAP
+            if not self.client:
+                return {
+                    'success': False,
+                    'cevap': 'OpenAI API key tanımlı değil. Lütfen yöneticinizle iletişime geçin.',
+                    'kaynak': 'HATA'
+                }
+
             logger.info("ChatGPT ile genel cevap üretiliyor")
 
             messages = [{"role": "system", "content": self.system_message}]
@@ -201,8 +232,8 @@ class ChatBot:
             # Sohbet geçmişini ekle (varsa)
             if sohbet_gecmisi:
                 for msg in sohbet_gecmisi[-Config.MAX_HISTORY_LENGTH:]:
-                    messages.append({"role": "user", "content": msg.get('soru', '')})
-                    messages.append({"role": "assistant", "content": msg.get('cevap', '')})
+                    messages.append({"role": "user", "content": msg.get('Soru', msg.get('soru', ''))})
+                    messages.append({"role": "assistant", "content": msg.get('Cevap', msg.get('cevap', ''))})
 
             # Yeni soruyu ekle
             messages.append({"role": "user", "content": soru})
@@ -210,18 +241,20 @@ class ChatBot:
             chatgpt_answer = self.call_chatgpt(messages)
 
             # Veritabanına kaydet
-            self._save_to_database(kullanici_id, soru, chatgpt_answer, None)
+            self._save_to_database(tc_kimlik_no, soru, chatgpt_answer, None, session_id)
 
             return {
                 'success': True,
                 'cevap': chatgpt_answer,
                 'kaynak': 'ChatGPT',
-                'soru_tur_kod': 'GENEL',
-                'soru_tur_id': None
+                'soru_tur_kod': 'GENEL'
             }
 
         except Exception as e:
             logger.error(f"Cevap üretme hatası: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
             error_message = "Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin."
 
             return {
@@ -231,58 +264,59 @@ class ChatBot:
                 'error': str(e)
             }
 
-    def _save_to_database(self, kullanici_id: int, soru: str, cevap: str, soru_tur_id: Optional[int]):
+    def _save_to_database(self, tc_kimlik_no: str, soru: str, cevap: str, soru_tur_id: Optional[int], session_id: Optional[str] = None):
         """
         Sohbeti veritabanına kaydeder
 
         Args:
-            kullanici_id: Kullanıcı ID
+            tc_kimlik_no: TC Kimlik No
             soru: Soru
             cevap: Cevap
             soru_tur_id: Soru türü ID (opsiyonel)
+            session_id: Session ID (opsiyonel)
         """
         try:
             query = """
-                INSERT INTO SOHBETLER (KullaniciId, Soru, Cevap, SoruTurId, Tarih)
-                VALUES (?, ?, ?, ?, GETDATE())
+                INSERT INTO SOHBETLER (TcKimlikNo, Soru, Cevap, SoruTurId, Tarih, SessionId)
+                VALUES (?, ?, ?, ?, GETDATE(), ?)
             """
-            self.db.execute_non_query(query, (kullanici_id, soru, cevap, soru_tur_id))
-            logger.debug("Sohbet veritabanına kaydedildi")
+            self.db.execute_non_query(query, (tc_kimlik_no, soru, cevap, soru_tur_id, session_id))
+            logger.debug(f"Sohbet veritabanına kaydedildi (SessionId: {session_id})")
 
         except Exception as e:
             logger.error(f"Veritabanına kaydetme hatası: {str(e)}")
 
-    def get_sohbet_gecmisi(self, kullanici_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_sohbet_gecmisi(self, tc_kimlik_no: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
         Kullanıcının sohbet geçmişini getirir
 
         Args:
-            kullanici_id: Kullanıcı ID
+            tc_kimlik_no: TC Kimlik No
             limit: Maksimum kayıt sayısı
 
         Returns:
             Sohbet geçmişi
         """
         try:
-            return self.db.get_sohbet_gecmisi(kullanici_id, limit)
+            return self.db.get_sohbet_gecmisi(tc_kimlik_no, limit)
         except Exception as e:
             logger.error(f"Sohbet geçmişi getirme hatası: {str(e)}")
             return []
 
-    def clear_sohbet_gecmisi(self, kullanici_id: int) -> bool:
+    def clear_sohbet_gecmisi(self, tc_kimlik_no: str) -> bool:
         """
         Kullanıcının sohbet geçmişini siler
 
         Args:
-            kullanici_id: Kullanıcı ID
+            tc_kimlik_no: TC Kimlik No
 
         Returns:
             Başarılı ise True
         """
         try:
-            query = "DELETE FROM SOHBETLER WHERE KullaniciId = ?"
-            self.db.execute_non_query(query, (kullanici_id,))
-            logger.info(f"Kullanıcı {kullanici_id} sohbet geçmişi silindi")
+            query = "DELETE FROM SOHBETLER WHERE TcKimlikNo = ?"
+            self.db.execute_non_query(query, (tc_kimlik_no,))
+            logger.info(f"Kullanıcı {tc_kimlik_no} sohbet geçmişi silindi")
             return True
 
         except Exception as e:

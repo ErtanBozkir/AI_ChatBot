@@ -60,27 +60,36 @@ class AuthManager:
             logger.error(f"Şifre doğrulama hatası: {str(e)}")
             return False
 
-    def create_token(self, kullanici_id: int, kullanici_adi: str) -> str:
+    def create_token(self, tc_kimlik_no: str, ad_soyad: str = None) -> str:
         """
-        JWT token oluşturur
+        JWT token oluşturur ve SESSIONS tablosuna kaydeder
 
         Args:
-            kullanici_id: Kullanıcı ID
-            kullanici_adi: Kullanıcı adı
+            tc_kimlik_no: TC Kimlik No
+            ad_soyad: Ad Soyad (opsiyonel)
 
         Returns:
             JWT token
         """
         try:
             payload = {
-                'kullanici_id': kullanici_id,
-                'kullanici_adi': kullanici_adi,
+                'tc_kimlik_no': tc_kimlik_no,
+                'ad_soyad': ad_soyad,
                 'exp': datetime.utcnow() + timedelta(hours=self.jwt_expiration_hours),
                 'iat': datetime.utcnow()
             }
 
             token = jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
-            logger.info(f"Token oluşturuldu: {kullanici_adi}")
+
+            # Token'ı SESSIONS tablosuna kaydet
+            expiration_date = datetime.utcnow() + timedelta(hours=self.jwt_expiration_hours)
+            query = """
+                INSERT INTO SESSIONS (TcKimlikNo, Token, OlusturmaTarihi, SonKullanim, AktifMi)
+                VALUES (?, ?, GETDATE(), ?, 1)
+            """
+            self.db.execute_non_query(query, (tc_kimlik_no, token, expiration_date))
+
+            logger.info(f"Token oluşturuldu: {tc_kimlik_no}")
             return token
 
         except Exception as e:
@@ -112,82 +121,66 @@ class AuthManager:
             logger.error(f"Token doğrulama hatası: {str(e)}")
             return None
 
-    def login(self, kullanici_adi: str, password: str) -> Dict[str, Any]:
+    def login(self, tc_kimlik_no: str, password: str) -> Dict[str, Any]:
         """
-        Kullanıcı girişi yapar
+        Kullanıcı girişi yapar (KNS_IK.dbo.Calisan tablosu üzerinden)
 
         Args:
-            kullanici_adi: Kullanıcı adı
+            tc_kimlik_no: TC Kimlik No
             password: Şifre
 
         Returns:
             Giriş sonucu (başarılı ise token içerir)
         """
         try:
-            # Kullanıcıyı veritabanından al
-            kullanici = self.db.get_kullanici_by_username(kullanici_adi)
+            # SP_KullaniciGiris stored procedure'ünü çağır
+            basarili = self.db.call_sp_kullanici_giris(tc_kimlik_no, password)
 
-            if not kullanici:
-                logger.warning(f"Kullanıcı bulunamadı: {kullanici_adi}")
+            if not basarili:
+                logger.warning(f"Başarısız giriş denemesi: {tc_kimlik_no}")
                 self.db.add_islem_log(
-                    None,
+                    tc_kimlik_no,
                     'Başarısız Giriş',
-                    f'Kullanıcı bulunamadı: {kullanici_adi}',
+                    f'TC: {tc_kimlik_no}',
                     hata_mi=True
                 )
                 return {
                     'success': False,
-                    'message': 'Kullanıcı adı veya şifre hatalı'
+                    'message': 'TC Kimlik No veya şifre hatalı'
                 }
 
-            # Şifreyi doğrula
-            if not self.verify_password(password, kullanici['SifreHash']):
-                logger.warning(f"Yanlış şifre: {kullanici_adi}")
-                self.db.add_islem_log(
-                    kullanici['Id'],
-                    'Başarısız Giriş',
-                    'Yanlış şifre',
-                    hata_mi=True
-                )
-                return {
-                    'success': False,
-                    'message': 'Kullanıcı adı veya şifre hatalı'
-                }
+            # Kullanıcı bilgilerini al
+            calisan = self.db.get_calisan_by_tc(tc_kimlik_no)
 
-            # Kullanıcı aktif mi kontrol et
-            if not kullanici.get('AktifMi'):
-                logger.warning(f"Pasif kullanıcı giriş denemesi: {kullanici_adi}")
-                self.db.add_islem_log(
-                    kullanici['Id'],
-                    'Başarısız Giriş',
-                    'Pasif kullanıcı',
-                    hata_mi=True
-                )
+            if not calisan:
+                logger.error(f"Giriş başarılı ama çalışan bulunamadı: {tc_kimlik_no}")
                 return {
                     'success': False,
-                    'message': 'Kullanıcı hesabı aktif değil'
+                    'message': 'Bir hata oluştu, lütfen tekrar deneyin'
                 }
 
             # Token oluştur
-            token = self.create_token(kullanici['Id'], kullanici['KullaniciAdi'])
+            token = self.create_token(tc_kimlik_no, calisan.get('AdSoyad'))
 
             # Başarılı giriş logu
             self.db.add_islem_log(
-                kullanici['Id'],
+                tc_kimlik_no,
                 'Başarılı Giriş',
-                f"Kullanıcı: {kullanici_adi}"
+                f"TC: {tc_kimlik_no}"
             )
 
-            logger.info(f"Başarılı giriş: {kullanici_adi}")
+            logger.info(f"Başarılı giriş: {tc_kimlik_no}")
 
             return {
                 'success': True,
                 'message': 'Giriş başarılı',
                 'token': token,
                 'kullanici': {
-                    'id': kullanici['Id'],
-                    'kullanici_adi': kullanici['KullaniciAdi'],
-                    'eposta': kullanici['Eposta']
+                    'tc_kimlik_no': calisan['TcKimlikNo'],
+                    'ad_soyad': calisan.get('AdSoyad'),
+                    'eposta': calisan.get('Eposta'),
+                    'departman': calisan.get('Departman'),
+                    'AdminMi': calisan.get('AdminMi', False)
                 }
             }
 
@@ -200,7 +193,8 @@ class AuthManager:
 
     def register(self, kullanici_adi: str, password: str, eposta: str) -> Dict[str, Any]:
         """
-        Yeni kullanıcı kaydı
+        Yeni kullanıcı kaydı - DEVRE DIŞI
+        (Çalışanlar KNS_IK.dbo.Calisan tablosunda tanımlıdır)
 
         Args:
             kullanici_adi: Kullanıcı adı
@@ -210,53 +204,11 @@ class AuthManager:
         Returns:
             Kayıt sonucu
         """
-        try:
-            # Kullanıcı adı kontrolü
-            existing_user = self.db.get_kullanici_by_username(kullanici_adi)
-            if existing_user:
-                return {
-                    'success': False,
-                    'message': 'Bu kullanıcı adı zaten kullanılıyor'
-                }
-
-            # Şifreyi hash'le
-            hashed_password = self.hash_password(password)
-
-            # Veritabanına ekle
-            query = """
-                INSERT INTO KULLANICILAR (KullaniciAdi, SifreHash, Eposta, KayitTarihi, AktifMi)
-                VALUES (?, ?, ?, GETDATE(), 1)
-            """
-            self.db.execute_non_query(query, (kullanici_adi, hashed_password, eposta))
-
-            # Yeni kullanıcıyı al
-            new_user = self.db.get_kullanici_by_username(kullanici_adi)
-
-            # Log ekle
-            self.db.add_islem_log(
-                new_user['Id'],
-                'Kullanıcı Kaydı',
-                f"Yeni kullanıcı: {kullanici_adi}"
-            )
-
-            logger.info(f"Yeni kullanıcı kaydedildi: {kullanici_adi}")
-
-            return {
-                'success': True,
-                'message': 'Kayıt başarılı',
-                'kullanici': {
-                    'id': new_user['Id'],
-                    'kullanici_adi': new_user['KullaniciAdi'],
-                    'eposta': new_user['Eposta']
-                }
-            }
-
-        except Exception as e:
-            logger.error(f"Kayıt hatası: {str(e)}")
-            return {
-                'success': False,
-                'message': 'Bir hata oluştu, lütfen tekrar deneyin'
-            }
+        logger.warning("Register fonksiyonu devre dışı bırakıldı")
+        return {
+            'success': False,
+            'message': 'Kullanıcı kaydı yapılamıyor. Lütfen İnsan Kaynakları departmanı ile iletişime geçin.'
+        }
 
 
 def token_required(f):
@@ -294,7 +246,7 @@ def token_required(f):
 
             # Kullanıcı bilgilerini al
             db = DatabaseManager()
-            current_user = db.get_kullanici_by_id(payload['kullanici_id'])
+            current_user = db.get_calisan_by_tc(payload['tc_kimlik_no'])
 
             if not current_user:
                 return jsonify({'message': 'Kullanıcı bulunamadı'}), 401
@@ -302,6 +254,64 @@ def token_required(f):
         except Exception as e:
             logger.error(f"Token doğrulama hatası: {str(e)}")
             return jsonify({'message': 'Token doğrulanamadı'}), 401
+
+        return f(current_user, *args, **kwargs)
+
+    return decorated
+
+
+def admin_required(f):
+    """
+    Flask route decorator - Admin yetkisi gerektirir
+
+    Kullanım:
+        @app.route('/admin')
+        @admin_required
+        def admin_route(current_user):
+            return jsonify({'message': 'Admin panel'})
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+
+        # Token'ı header'dan al
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            try:
+                token = auth_header.split(" ")[1]
+            except IndexError:
+                return jsonify({'message': 'Token formatı hatalı'}), 401
+
+        if not token:
+            return jsonify({'message': 'Token bulunamadı'}), 401
+
+        try:
+            # Token'ı doğrula
+            auth = AuthManager()
+            payload = auth.verify_token(token)
+
+            if not payload:
+                return jsonify({'message': 'Geçersiz veya süresi dolmuş token'}), 401
+
+            # Kullanıcı bilgilerini al
+            db = DatabaseManager()
+            current_user = db.get_calisan_by_tc(payload['tc_kimlik_no'])
+
+            if not current_user:
+                return jsonify({'message': 'Kullanıcı bulunamadı'}), 401
+
+            # Admin kontrolü
+            is_admin = current_user.get('AdminMi', False) or current_user.get('Admin', False)
+            if not is_admin:
+                logger.warning(f"Admin yetkisi olmayan erişim denemesi: {payload['tc_kimlik_no']}")
+                return jsonify({
+                    'success': False,
+                    'message': 'Bu sayfaya erişim yetkiniz bulunmamaktadır'
+                }), 403
+
+        except Exception as e:
+            logger.error(f"Admin kontrolü hatası: {str(e)}")
+            return jsonify({'message': 'Yetkilendirme hatası'}), 401
 
         return f(current_user, *args, **kwargs)
 

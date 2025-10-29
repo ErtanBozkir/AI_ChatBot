@@ -1,0 +1,28 @@
+-- TESTDB'de admin kullanıcılar tablosu oluştur
+USE TESTDB;
+GO
+
+-- ADMIN_KULLANICILAR tablosu
+IF OBJECT_ID('dbo.ADMIN_KULLANICILAR', 'U') IS NOT NULL
+    DROP TABLE dbo.ADMIN_KULLANICILAR;
+GO
+
+CREATE TABLE dbo.ADMIN_KULLANICILAR (
+    Id INT PRIMARY KEY IDENTITY(1,1),
+    TcKimlikNo NVARCHAR(11) NOT NULL UNIQUE,
+    EklenmeTarihi DATETIME NOT NULL DEFAULT GETDATE(),
+    AktifMi BIT NOT NULL DEFAULT 1
+);
+GO
+
+-- Index ekle
+CREATE INDEX IX_ADMIN_KULLANICILAR_TcKimlikNo ON dbo.ADMIN_KULLANICILAR(TcKimlikNo);
+GO
+
+-- Test kullanıcısını admin olarak ekle (TC: 65968234430)
+INSERT INTO dbo.ADMIN_KULLANICILAR (TcKimlikNo, AktifMi)
+VALUES ('65968234430', 1);
+
+PRINT 'ADMIN_KULLANICILAR tablosu oluşturuldu';
+PRINT 'Admin kullanıcı eklendi: 65968234430';
+GO

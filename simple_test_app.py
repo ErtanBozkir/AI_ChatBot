@@ -68,7 +68,7 @@ def mock_chatgpt_response(soru, soru_tur_kod=None):
     elif 'eğitim' in soru_lower or 'kurs' in soru_lower:
         return MOCK_RESPONSES['EGITIM_TALEP']
     elif 'merhaba' in soru_lower or 'selam' in soru_lower or 'hello' in soru_lower:
-        return f"Merhaba! Ben firma chatbot asistanınızım. Size nasıl yardımcı olabilirim? 👋"
+        return f"Merhaba! Ben KNS Otomotiv Dijital asistanınızım. Size nasıl yardımcı olabilirim? 👋"
     elif 'teşekkür' in soru_lower or 'sağol' in soru_lower:
         return "Rica ederim! Başka bir sorunuz olursa yardımcı olmaktan mutluluk duyarım. 😊"
     else:
@@ -295,7 +295,7 @@ if __name__ == '__main__':
         print("Lütfen önce şunu çalıştırın: python test_setup.py\n")
     else:
         print("\n" + "="*70)
-        print("🚀 FIRMA CHATBOT TEST SUNUCUSU BAŞLATIILIYOR")
+        print("🚀 KNS OTOMOTIV TEST SUNUCUSU BAŞLATILIYOR")
         print("="*70)
         print("\n📌 Test Ortamı Bilgileri:")
         print(f"   🌐 URL: http://localhost:{TestConfig.PORT}")

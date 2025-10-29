@@ -1,5 +1,5 @@
 /**
- * Firma Chatbot - Frontend JavaScript
+ * KNS Otomotiv Dijital Asistan - Frontend JavaScript
  * Tüm API çağrıları ve UI yönetimi
  */
 
@@ -8,6 +8,26 @@
 // ============================================
 
 const API_BASE_URL = window.location.origin + '/api';
+const API_URL = window.location.origin;
+
+// Helper function for getting token
+function getToken() {
+    return localStorage.getItem('chatbot_token');
+}
+
+// Configure marked.js for markdown rendering
+if (typeof marked !== 'undefined') {
+    marked.setOptions({
+        breaks: true,
+        gfm: true,
+        highlight: function(code, lang) {
+            if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
+                return hljs.highlight(code, { language: lang }).value;
+            }
+            return code;
+        }
+    });
+}
 
 // ============================================
 // State Management
@@ -17,8 +37,35 @@ const AppState = {
     token: localStorage.getItem('chatbot_token'),
     user: JSON.parse(localStorage.getItem('chatbot_user') || 'null'),
     currentScreen: 'login',
-    chatHistory: []
+    chatHistory: [],
+    currentSessionId: localStorage.getItem('chatbot_session_id') || null
 };
+
+// ============================================
+// Session Management
+// ============================================
+
+function generateSessionId() {
+    // Generate UUID v4
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+function createNewSession() {
+    const sessionId = generateSessionId();
+    AppState.currentSessionId = sessionId;
+    localStorage.setItem('chatbot_session_id', sessionId);
+    console.log('New session created:', sessionId);
+    return sessionId;
+}
+
+function clearCurrentSession() {
+    AppState.currentSessionId = null;
+    localStorage.removeItem('chatbot_session_id');
+}
 
 // ============================================
 // Utility Functions
@@ -177,9 +224,30 @@ function handleLogout() {
 function initializeChatScreen() {
     // Set user info
     const user = AppState.user;
-    document.getElementById('user-initial').textContent = user.kullanici_adi.charAt(0).toUpperCase();
-    document.getElementById('user-name').textContent = user.kullanici_adi;
-    document.getElementById('user-email').textContent = user.eposta;
+    const displayName = user.ad_soyad || user.kullanici_adi || user.tc_kimlik_no;
+    const initial = displayName ? displayName.charAt(0).toUpperCase() : 'U';
+
+    document.getElementById('user-initial').textContent = initial;
+    document.getElementById('user-name').textContent = displayName;
+    document.getElementById('user-email').textContent = user.eposta || 'Bilinmiyor';
+
+    // Show/hide admin buttons based on admin status
+    const dashboardBtn = document.getElementById('btn-dashboard');
+    const docManageBtn = document.getElementById('btn-doc-manage');
+    const isAdmin = user.AdminMi || user.admin_mi || false;
+
+    if (dashboardBtn) {
+        dashboardBtn.style.display = isAdmin ? 'flex' : 'none';
+    }
+    if (docManageBtn) {
+        docManageBtn.style.display = isAdmin ? 'flex' : 'none';
+    }
+    console.log('User admin status:', isAdmin);
+
+    // Create new session if none exists
+    if (!AppState.currentSessionId) {
+        createNewSession();
+    }
 
     // Clear previous messages
     clearChatMessages();
@@ -190,7 +258,7 @@ function clearChatMessages() {
     messagesContainer.innerHTML = `
         <div class="welcome-message">
             <div class="bot-avatar-large">AI</div>
-            <h2>Merhaba! Ben firma chatbot asistanınızım.</h2>
+            <h2>Merhaba! Ben KNS Otomotiv Dijital Asistanınızım.</h2>
             <p>Size nasıl yardımcı olabilirim?</p>
             <div class="quick-actions">
                 <button class="quick-btn" data-question="Kalan izin hakkım kaç gün?">İzin Hakkı</button>
@@ -216,7 +284,7 @@ function attachQuickButtonListeners() {
     });
 }
 
-function addMessage(text, isUser = false, source = null) {
+function addMessage(text, isUser = false, source = null, confidence = null) {
     const messagesContainer = document.getElementById('chat-messages');
 
     // Remove welcome message if exists
@@ -230,19 +298,98 @@ function addMessage(text, isUser = false, source = null) {
 
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
-    avatar.textContent = isUser
-        ? AppState.user.kullanici_adi.charAt(0).toUpperCase()
-        : 'AI';
+    if (isUser) {
+        const displayName = AppState.user.ad_soyad || AppState.user.kullanici_adi || AppState.user.tc_kimlik_no;
+        avatar.textContent = displayName ? displayName.charAt(0).toUpperCase() : 'U';
+    } else {
+        avatar.textContent = 'AI';
+    }
 
     const content = document.createElement('div');
     content.className = 'message-content';
-    content.textContent = text;
+
+    // Create text container
+    const textContainer = document.createElement('div');
+    textContainer.className = 'message-text';
+
+    // Render markdown for bot messages
+    if (!isUser && typeof marked !== 'undefined') {
+        textContainer.innerHTML = marked.parse(text);
+        // Highlight code blocks
+        if (typeof hljs !== 'undefined') {
+            textContainer.querySelectorAll('pre code').forEach((block) => {
+                hljs.highlightElement(block);
+            });
+        }
+    } else {
+        textContainer.textContent = text;
+    }
+
+    content.appendChild(textContainer);
+
+    // Add metadata container
+    const metaContainer = document.createElement('div');
+    metaContainer.className = 'message-meta';
 
     if (!isUser && source) {
         const sourceSpan = document.createElement('span');
         sourceSpan.className = 'message-source';
         sourceSpan.textContent = `Kaynak: ${source}`;
-        content.appendChild(sourceSpan);
+        metaContainer.appendChild(sourceSpan);
+    }
+
+    // Add confidence badge for bot messages
+    if (!isUser && confidence && confidence > 0) {
+        const confidencePercent = Math.round(confidence * 100);
+        const confidenceBadge = document.createElement('span');
+        confidenceBadge.className = 'confidence-badge';
+
+        // Color based on confidence level
+        if (confidencePercent >= 80) {
+            confidenceBadge.classList.add('high');
+        } else if (confidencePercent >= 50) {
+            confidenceBadge.classList.add('medium');
+        } else {
+            confidenceBadge.classList.add('low');
+        }
+
+        confidenceBadge.textContent = `Güven: %${confidencePercent}`;
+        confidenceBadge.title = `AI bu cevaptan %${confidencePercent} emin`;
+        metaContainer.appendChild(confidenceBadge);
+    }
+
+    if (metaContainer.children.length > 0) {
+        content.appendChild(metaContainer);
+    }
+
+    // Add reaction buttons for bot messages
+    if (!isUser) {
+        const reactionsDiv = document.createElement('div');
+        reactionsDiv.className = 'message-reactions';
+
+        const likeBtn = document.createElement('button');
+        likeBtn.className = 'reaction-btn positive';
+        likeBtn.innerHTML = '👍';
+        likeBtn.title = 'Faydalı';
+        likeBtn.onclick = (e) => {
+            e.preventDefault();
+            console.log('Like button clicked!');
+            handleReaction(messageDiv, 'positive', text);
+        };
+
+        const dislikeBtn = document.createElement('button');
+        dislikeBtn.className = 'reaction-btn negative';
+        dislikeBtn.innerHTML = '👎';
+        dislikeBtn.title = 'Faydalı değil';
+        dislikeBtn.onclick = (e) => {
+            e.preventDefault();
+            console.log('Dislike button clicked!');
+            handleReaction(messageDiv, 'negative', text);
+        };
+
+        reactionsDiv.appendChild(likeBtn);
+        reactionsDiv.appendChild(dislikeBtn);
+        content.appendChild(reactionsDiv);
     }
 
     messageDiv.appendChild(avatar);
@@ -250,6 +397,34 @@ function addMessage(text, isUser = false, source = null) {
 
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+async function handleReaction(messageDiv, reactionType, messageText) {
+    const reactions = messageDiv.querySelectorAll('.reaction-btn');
+
+    // Toggle active state
+    reactions.forEach(btn => {
+        if (btn.classList.contains(reactionType)) {
+            btn.classList.toggle('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+
+    // Send feedback to backend
+    try {
+        console.log('Sending feedback:', { reactionType, messageText: messageText.substring(0, 100) });
+
+        const result = await apiCall('/chat/feedback', 'POST', {
+            message: messageText.substring(0, 500), // Limit length
+            reaction: reactionType,
+            timestamp: new Date().toISOString()
+        });
+
+        console.log('Feedback sent successfully:', result);
+    } catch (error) {
+        console.error('Feedback error:', error);
+    }
 }
 
 async function handleChatSubmit(event) {
@@ -260,6 +435,11 @@ async function handleChatSubmit(event) {
 
     if (!question) return;
 
+    // Ensure we have a session ID
+    if (!AppState.currentSessionId) {
+        createNewSession();
+    }
+
     // Add user message
     addMessage(question, true);
     input.value = '';
@@ -269,17 +449,19 @@ async function handleChatSubmit(event) {
 
     try {
         const result = await apiCall('/chat/ask', 'POST', {
-            soru: question
+            soru: question,
+            session_id: AppState.currentSessionId
         });
 
         showTypingIndicator(false);
 
         if (result.success) {
-            addMessage(result.cevap, false, result.kaynak);
+            addMessage(result.cevap, false, result.kaynak, result.guven_skoru);
             AppState.chatHistory.push({
                 soru: question,
                 cevap: result.cevap,
-                kaynak: result.kaynak
+                kaynak: result.kaynak,
+                guven_skoru: result.guven_skoru
             });
         } else {
             addMessage('Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin.', false);
@@ -292,7 +474,11 @@ async function handleChatSubmit(event) {
 }
 
 function handleNewChat() {
+    // Create a new session
+    createNewSession();
+    // Clear chat messages
     clearChatMessages();
+    console.log('Started new chat session');
 }
 
 // ============================================
@@ -307,25 +493,40 @@ async function showHistoryModal() {
     historyList.innerHTML = '<p class="loading">Yükleniyor...</p>';
 
     try {
-        const result = await apiCall('/chat/history?limit=20');
+        const result = await apiCall('/chat/sessions?limit=20');
 
-        if (result.success && result.history.length > 0) {
+        if (result.success && result.sessions.length > 0) {
             historyList.innerHTML = '';
 
-            result.history.forEach(item => {
-                const historyItem = document.createElement('div');
-                historyItem.className = 'history-item';
+            result.sessions.forEach(session => {
+                const sessionItem = document.createElement('div');
+                sessionItem.className = 'history-item session-item';
+                sessionItem.style.cursor = 'pointer';
 
-                const date = new Date(item.Tarih);
-                const timeStr = date.toLocaleString('tr-TR');
+                const startDate = new Date(session.IlkMesajTarihi);
+                const endDate = new Date(session.SonMesajTarihi);
+                const startTimeStr = startDate.toLocaleString('tr-TR');
+                const endTimeStr = endDate.toLocaleString('tr-TR');
 
-                historyItem.innerHTML = `
-                    <div class="history-item-question">${item.Soru}</div>
-                    <div class="history-item-answer">${item.Cevap.substring(0, 100)}...</div>
-                    <div class="history-item-time">${timeStr}</div>
+                // Truncate first question if too long
+                const firstQuestion = session.IlkSoru ? session.IlkSoru.substring(0, 80) : 'Sohbet';
+                const truncated = session.IlkSoru && session.IlkSoru.length > 80 ? '...' : '';
+
+                sessionItem.innerHTML = `
+                    <div class="history-item-question">${firstQuestion}${truncated}</div>
+                    <div class="history-item-answer">
+                        ${session.MesajSayisi} mesaj • ${startTimeStr}
+                    </div>
+                    <div class="history-item-time">Son mesaj: ${endTimeStr}</div>
                 `;
 
-                historyList.appendChild(historyItem);
+                // Add click handler to load session
+                sessionItem.addEventListener('click', () => {
+                    loadSession(session.SessionId);
+                    closeModals();
+                });
+
+                historyList.appendChild(sessionItem);
             });
         } else {
             historyList.innerHTML = '<p class="loading">Henüz sohbet geçmişiniz yok.</p>';
@@ -333,6 +534,49 @@ async function showHistoryModal() {
     } catch (error) {
         historyList.innerHTML = '<p class="loading">Geçmiş yüklenirken hata oluştu.</p>';
         console.error('History error:', error);
+    }
+}
+
+async function loadSession(sessionId) {
+    console.log('Loading session:', sessionId);
+
+    try {
+        showLoading(true);
+
+        // Get all messages for this session
+        const result = await apiCall(`/chat/sessions/${sessionId}`);
+
+        if (result.success && result.messages.length > 0) {
+            // Set current session
+            AppState.currentSessionId = sessionId;
+            localStorage.setItem('chatbot_session_id', sessionId);
+
+            // Clear current messages
+            const messagesContainer = document.getElementById('chat-messages');
+            messagesContainer.innerHTML = '';
+            AppState.chatHistory = [];
+
+            // Display all messages from the session
+            result.messages.forEach(msg => {
+                // Add question (user message)
+                addMessage(msg.Soru, true);
+
+                // Add answer (bot message)
+                addMessage(msg.Cevap, false);
+
+                AppState.chatHistory.push({
+                    soru: msg.Soru,
+                    cevap: msg.Cevap
+                });
+            });
+
+            console.log(`Loaded ${result.messages.length} messages from session ${sessionId}`);
+        }
+    } catch (error) {
+        console.error('Error loading session:', error);
+        addMessage('Sohbet yüklenirken hata oluştu.', false);
+    } finally {
+        showLoading(false);
     }
 }
 
@@ -386,10 +630,72 @@ function closeModals() {
 }
 
 // ============================================
+// Mobile Menu Management
+// ============================================
+
+function toggleMobileSidebar() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('mobile-overlay');
+
+    sidebar.classList.toggle('active');
+    overlay.classList.toggle('active');
+}
+
+function closeMobileSidebar() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('mobile-overlay');
+
+    sidebar.classList.remove('active');
+    overlay.classList.remove('active');
+}
+
+function handleResize() {
+    // Close mobile sidebar if window is resized to desktop size
+    if (window.innerWidth > 768) {
+        closeMobileSidebar();
+    }
+}
+
+// ============================================
+// Dark Mode Toggle
+// ============================================
+
+function initializeTheme() {
+    // Check saved theme preference or default to light
+    const savedTheme = localStorage.getItem('chatbot_theme') || 'light';
+    setTheme(savedTheme);
+}
+
+function setTheme(theme) {
+    const html = document.documentElement;
+    const themeIcon = document.getElementById('theme-icon');
+
+    if (theme === 'dark') {
+        html.setAttribute('data-theme', 'dark');
+        if (themeIcon) themeIcon.textContent = '☀️';
+        localStorage.setItem('chatbot_theme', 'dark');
+    } else {
+        html.setAttribute('data-theme', 'light');
+        if (themeIcon) themeIcon.textContent = '🌙';
+        localStorage.setItem('chatbot_theme', 'light');
+    }
+}
+
+function toggleTheme() {
+    const html = document.documentElement;
+    const currentTheme = html.getAttribute('data-theme') || 'light';
+    const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+    setTheme(newTheme);
+}
+
+// ============================================
 // Event Listeners
 // ============================================
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialize theme
+    initializeTheme();
+
     // Check if user is already logged in
     if (AppState.token && AppState.user) {
         showScreen('chat-screen');
@@ -398,24 +704,8 @@ document.addEventListener('DOMContentLoaded', () => {
         showScreen('login-screen');
     }
 
-    // Login/Register tab switching
-    document.getElementById('tab-login').addEventListener('click', () => {
-        document.getElementById('tab-login').classList.add('active');
-        document.getElementById('tab-register').classList.remove('active');
-        document.getElementById('login-form').classList.add('active');
-        document.getElementById('register-form').classList.remove('active');
-    });
-
-    document.getElementById('tab-register').addEventListener('click', () => {
-        document.getElementById('tab-register').classList.add('active');
-        document.getElementById('tab-login').classList.remove('active');
-        document.getElementById('register-form').classList.add('active');
-        document.getElementById('login-form').classList.remove('active');
-    });
-
     // Form submissions
     document.getElementById('login-form').addEventListener('submit', handleLogin);
-    document.getElementById('register-form').addEventListener('submit', handleRegister);
     document.getElementById('chat-form').addEventListener('submit', handleChatSubmit);
 
     // Sidebar buttons
@@ -423,6 +713,22 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-new-chat').addEventListener('click', handleNewChat);
     document.getElementById('btn-history').addEventListener('click', showHistoryModal);
     document.getElementById('btn-documents').addEventListener('click', showDocumentsModal);
+
+    // Dashboard button (only if exists, admin only)
+    const dashboardBtn = document.getElementById('btn-dashboard');
+    if (dashboardBtn) {
+        dashboardBtn.addEventListener('click', openDashboard);
+    }
+
+    // Document Management button (only if exists, admin only)
+    const docManageBtn = document.getElementById('btn-doc-manage');
+    if (docManageBtn) {
+        docManageBtn.addEventListener('click', () => {
+            if (typeof DocManage !== 'undefined') {
+                DocManage.open();
+            }
+        });
+    }
 
     // Modal close buttons
     document.querySelectorAll('.modal-close').forEach(btn => {
@@ -448,6 +754,36 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('chat-form').dispatchEvent(new Event('submit'));
         }
     });
+
+    // Mobile menu button
+    const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+    if (mobileMenuBtn) {
+        mobileMenuBtn.addEventListener('click', toggleMobileSidebar);
+    }
+
+    // Mobile overlay
+    const mobileOverlay = document.getElementById('mobile-overlay');
+    if (mobileOverlay) {
+        mobileOverlay.addEventListener('click', closeMobileSidebar);
+    }
+
+    // Close mobile sidebar when clicking on menu items
+    document.querySelectorAll('.sidebar .menu-item').forEach(item => {
+        item.addEventListener('click', () => {
+            if (window.innerWidth <= 768) {
+                closeMobileSidebar();
+            }
+        });
+    });
+
+    // Handle window resize
+    window.addEventListener('resize', handleResize);
+
+    // Theme toggle button
+    const themeToggleBtn = document.getElementById('theme-toggle');
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', toggleTheme);
+    }
 
     console.log('Chatbot initialized successfully');
 });

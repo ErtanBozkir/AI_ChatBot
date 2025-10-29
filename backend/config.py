@@ -76,9 +76,10 @@ class Config:
     def validate(cls):
         """Konfigürasyon doğrulama"""
         errors = []
+        warnings = []
 
         if not cls.OPENAI_API_KEY:
-            errors.append("OPENAI_API_KEY bulunamadı!")
+            warnings.append("OPENAI_API_KEY bulunamadı - ChatGPT özellikleri çalışmayacak")
 
         if not cls.DB_SERVER:
             errors.append("DB_SERVER bulunamadı!")
@@ -89,6 +90,10 @@ class Config:
                 print(f"Dokümanlar klasörü oluşturuldu: {cls.DOCUMENTS_PATH}")
             except Exception as e:
                 errors.append(f"Dokümanlar klasörü oluşturulamadı: {str(e)}")
+
+        if warnings:
+            for warning in warnings:
+                print(f"⚠️  WARNING: {warning}")
 
         if errors:
             raise ValueError("\n".join(errors))

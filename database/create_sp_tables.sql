@@ -1,0 +1,80 @@
+
+IF OBJECT_ID('dbo.SoruTurleri', 'U') IS NOT NULL
+    DROP TABLE dbo.SoruTurleri;
+GO
+
+CREATE TABLE dbo.SoruTurleri (
+    Id INT PRIMARY KEY IDENTITY(1,1),
+    Kod NVARCHAR(50) NOT NULL UNIQUE,
+    Aciklama NVARCHAR(255) NULL,
+    AktifMi BIT NOT NULL DEFAULT 1,
+    OlusturmaTarihi DATETIME NOT NULL DEFAULT GETDATE()
+);
+GO
+
+CREATE INDEX IX_SoruTurleri_Kod ON dbo.SoruTurleri(Kod);
+GO
+GO
+
+IF OBJECT_ID('dbo.Sohbetler', 'U') IS NOT NULL
+    DROP TABLE dbo.Sohbetler;
+GO
+
+CREATE TABLE dbo.Sohbetler (
+    Id INT PRIMARY KEY IDENTITY(1,1),
+    TcKimlikNo nvarchar(50) NOT NULL,
+    Soru NVARCHAR(MAX) NOT NULL,
+    Cevap NVARCHAR(MAX) NULL,
+    SoruTurId INT NULL,
+    Tarih DATETIME NOT NULL DEFAULT GETDATE(),
+    IslemSuresi INT NULL, -- Milisaniye cinsinden
+    CONSTRAINT FK_Sohbetler_SoruTurId
+        FOREIGN KEY (SoruTurId) REFERENCES dbo.SoruTurleri(Id)
+        ON DELETE SET NULL
+);
+GO
+
+CREATE INDEX IX_Sohbetler_TcKimlikNo ON dbo.Sohbetler(TcKimlikNo);
+CREATE INDEX IX_Sohbetler_Tarih ON dbo.Sohbetler(Tarih DESC);
+CREATE INDEX IX_Sohbetler_SoruTurId ON dbo.Sohbetler(SoruTurId);
+GO
+
+IF OBJECT_ID('dbo.ISLEM_LOG', 'U') IS NOT NULL
+    DROP TABLE dbo.ISLEM_LOG;
+GO
+
+CREATE TABLE dbo.ISLEM_LOG (
+    Id INT PRIMARY KEY IDENTITY(1,1),
+    TcKimlikNo nvarchar(50) NULL,
+    Islem NVARCHAR(255) NOT NULL,
+    Detay NVARCHAR(MAX) NULL,
+    Tarih DATETIME NOT NULL DEFAULT GETDATE(),
+    HataMi BIT NOT NULL DEFAULT 0
+);
+GO
+
+CREATE INDEX IX_ISLEM_LOG_TcKimlikNo ON dbo.ISLEM_LOG(TcKimlikNo);
+CREATE INDEX IX_ISLEM_LOG_Tarih ON dbo.ISLEM_LOG(Tarih DESC);
+CREATE INDEX IX_ISLEM_LOG_HataMi ON dbo.ISLEM_LOG(HataMi);
+GO
+
+IF OBJECT_ID('dbo.SESSIONS', 'U') IS NOT NULL
+    DROP TABLE dbo.SESSIONS;
+GO
+
+CREATE TABLE dbo.SESSIONS (
+    Id INT PRIMARY KEY IDENTITY(1,1),
+    TcKimlikNo nvarchar(50) NOT NULL,
+    Token NVARCHAR(500) NOT NULL UNIQUE,
+    OlusturmaTarihi DATETIME NOT NULL DEFAULT GETDATE(),
+    SonKullanim DATETIME NOT NULL,
+    AktifMi BIT NOT NULL DEFAULT 1
+);
+GO
+
+CREATE INDEX IX_SESSIONS_Token ON dbo.SESSIONS(Token);
+CREATE INDEX IX_SESSIONS_TcKimlikNo ON dbo.SESSIONS(TcKimlikNo);
+GO
+
+GO
+
