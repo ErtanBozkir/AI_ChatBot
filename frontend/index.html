@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firma Chatbot - AI Asistan</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Giriş Ekranı -->
+    <div id="login-screen" class="screen active">
+        <div class="login-container">
+            <div class="login-header">
+                <h1>Firma Chatbot</h1>
+                <p>AI Destekli Akıllı Asistan</p>
+            </div>
+
+            <div class="login-form">
+                <div class="tab-buttons">
+                    <button id="tab-login" class="tab-button active">Giriş Yap</button>
+                    <button id="tab-register" class="tab-button">Kayıt Ol</button>
+                </div>
+
+                <!-- Giriş Formu -->
+                <form id="login-form" class="form-content active">
+                    <div class="form-group">
+                        <label for="login-username">Kullanıcı Adı</label>
+                        <input type="text" id="login-username" placeholder="kullanici_adi" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">Şifre</label>
+                        <input type="password" id="login-password" placeholder="••••••••" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Giriş Yap</button>
+                    <div id="login-error" class="error-message"></div>
+                </form>
+
+                <!-- Kayıt Formu -->
+                <form id="register-form" class="form-content">
+                    <div class="form-group">
+                        <label for="register-username">Kullanıcı Adı</label>
+                        <input type="text" id="register-username" placeholder="kullanici_adi" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="register-email">E-posta</label>
+                        <input type="email" id="register-email" placeholder="ornek@firma.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="register-password">Şifre</label>
+                        <input type="password" id="register-password" placeholder="••••••••" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Kayıt Ol</button>
+                    <div id="register-error" class="error-message"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Ekranı -->
+    <div id="chat-screen" class="screen">
+        <div class="chat-container">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <h2>Firma Chatbot</h2>
+                </div>
+
+                <div class="user-info">
+                    <div class="user-avatar">
+                        <span id="user-initial">U</span>
+                    </div>
+                    <div class="user-details">
+                        <span id="user-name" class="user-name">Kullanıcı</span>
+                        <span id="user-email" class="user-email">user@firma.com</span>
+                    </div>
+                </div>
+
+                <div class="sidebar-menu">
+                    <button id="btn-new-chat" class="menu-item">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M12 5v14M5 12h14" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        Yeni Sohbet
+                    </button>
+                    <button id="btn-history" class="menu-item">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        Geçmiş
+                    </button>
+                    <button id="btn-documents" class="menu-item">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        Dokümanlar
+                    </button>
+                    <button id="btn-logout" class="menu-item logout">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        Çıkış
+                    </button>
+                </div>
+
+                <div class="sidebar-footer">
+                    <small>v1.0.0 - AI Chatbot</small>
+                </div>
+            </div>
+
+            <!-- Main Chat Area -->
+            <div class="chat-main">
+                <div class="chat-header">
+                    <h3>AI Asistan</h3>
+                    <div class="chat-status">
+                        <span class="status-dot"></span>
+                        <span>Çevrimiçi</span>
+                    </div>
+                </div>
+
+                <div id="chat-messages" class="chat-messages">
+                    <div class="welcome-message">
+                        <div class="bot-avatar-large">AI</div>
+                        <h2>Merhaba! Ben firma chatbot asistanınızım.</h2>
+                        <p>Size nasıl yardımcı olabilirim?</p>
+                        <div class="quick-actions">
+                            <button class="quick-btn" data-question="Kalan izin hakkım kaç gün?">İzin Hakkı</button>
+                            <button class="quick-btn" data-question="Maaşım ne zaman yatacak?">Maaş Bilgisi</button>
+                            <button class="quick-btn" data-question="Üzerimdeki zimmetler neler?">Zimmet Bilgisi</button>
+                            <button class="quick-btn" data-question="Eğitim almak istiyorum">Eğitim Talebi</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chat-input-container">
+                    <div id="typing-indicator" class="typing-indicator">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                    <form id="chat-form" class="chat-input-form">
+                        <input
+                            type="text"
+                            id="chat-input"
+                            placeholder="Sorunuzu yazın..."
+                            autocomplete="off"
+                            required
+                        >
+                        <button type="submit" id="send-button" class="send-button">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Geçmiş -->
+    <div id="history-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Sohbet Geçmişi</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="history-list" class="history-list">
+                    <p class="loading">Yükleniyor...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Dokümanlar -->
+    <div id="documents-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Dokümanlar</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="documents-list" class="documents-list">
+                    <p class="loading">Yükleniyor...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
