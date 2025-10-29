@@ -1,0 +1,6 @@
+# Test ortamı için minimal gereksinimler
+# Kurulum: pip install -r requirements_test.txt
+
+Flask==3.0.0
+Flask-CORS==4.0.0
+bcrypt==4.1.2
