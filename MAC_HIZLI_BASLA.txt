@@ -1,0 +1,29 @@
+🍎 MACBOOK İÇİN HIZLI BAŞLANGIÇ
+=====================================
+
+Terminal'i aç (Cmd+Space → "Terminal" → Enter)
+
+Sonra bu komutları sırayla kopyala-yapıştır:
+
+1️⃣ Proje klasörüne git:
+   cd ~/Downloads/AI_ChatBot
+
+2️⃣ Paketleri yükle:
+   bash install.sh
+
+3️⃣ Veritabanı oluştur:
+   bash setup_database.sh
+
+4️⃣ Sunucu başlat:
+   bash start.sh
+
+5️⃣ Tarayıcıda aç:
+   http://localhost:5000
+
+6️⃣ Giriş yap:
+   Kullanıcı: ahmet.yilmaz
+   Şifre: 12345
+
+🎉 HAZIR!
+
+Detaylı rehber: KURULUM_MAC.md dosyasına bak
