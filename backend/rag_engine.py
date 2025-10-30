@@ -40,16 +40,21 @@ class RAGEngine:
         Returns:
             True ise dokümanlardan cevapla
         """
-        # SQL keywords (kullanıcı verisiyle ilgili)
+        # SQL keywords (kullanıcı verisiyle ilgili - kişisel data)
         sql_keywords = [
             'kaç', 'ne kadar', 'izin', 'maaş', 'zimmet', 'bordro',
-            'mesai', 'tatil', 'kalan', 'toplam', 'son'
+            'mesai', 'tatil', 'kalan', 'toplam', 'son',
+            'hangi', 'departman', 'çalışıyorum', 'benim', 'bende',
+            'kullandığım', 'aldığım', 'talep', 'yıllık', 'üzerimde',
+            'yıldır', 'ne zaman', 'kaç gün', 'avans', 'harcama',
+            'stok', 'bakiye', 'adet', 'miktar', 'ürün', 'malzeme', 'depo'
         ]
 
-        # Document keywords (şirket kuralları, prosedürler)
+        # Document keywords (şirket kuralları, prosedürler, talimatlar)
         doc_keywords = [
             'nasıl', 'nedir', 'ne demek', 'prosedür', 'kural', 'politika',
-            'talimat', 'süreç', 'adım', 'gerekli', 'başvuru'
+            'talimat', 'süreç', 'adım', 'gerekli', 'başvuru', 'form',
+            'yapılır', 'uygulanır', 'şekilde'
         ]
 
         question_lower = question.lower()
@@ -58,12 +63,13 @@ class RAGEngine:
         has_sql_keyword = any(kw in question_lower for kw in sql_keywords)
         has_doc_keyword = any(kw in question_lower for kw in doc_keywords)
 
-        # "nasıl", "nedir" gibi açıklayıcı sorular her zaman dokümandan
-        if has_doc_keyword:
+        # "nasıl", "nedir" gibi AÇIKLAYICI sorular dokümandan
+        # ANCAK kişisel veri içeriyorsa (hangi departmandayım, nasıl izin alabilirim) SQL+Doküman
+        if has_doc_keyword and not has_sql_keyword:
             return True
 
-        # Sadece veri sorgusu ise SQL
-        if has_sql_keyword and not has_doc_keyword:
+        # Kişisel veri sorgusu ise SQL
+        if has_sql_keyword:
             return False
 
         # Belirsiz durumlarda doküman ara

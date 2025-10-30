@@ -12,6 +12,7 @@ from config import Config
 from database import DatabaseManager
 from document_reader import DocumentReader
 from question_analyzer import QuestionAnalyzer
+from text_to_sql import TextToSQLEngine
 
 # Logging ayarları
 logging.basicConfig(level=Config.LOG_LEVEL)
@@ -25,6 +26,7 @@ class ChatBot:
         self.db = DatabaseManager()
         self.doc_reader = DocumentReader()
         self.analyzer = QuestionAnalyzer()
+        self.text_to_sql = TextToSQLEngine()
         self.client = OpenAI(api_key=Config.OPENAI_API_KEY) if Config.OPENAI_API_KEY else None
         self.model = Config.OPENAI_MODEL
         self.temperature = Config.OPENAI_TEMPERATURE
@@ -201,6 +203,36 @@ class ChatBot:
                     'parametreler': parametreler,
                     'guven_skoru': guven_skoru
                 }
+
+            # 3.5. TEXT-TO-SQL DENEYİMİ (SP cevap vermediyse)
+            logger.info("SP cevap vermedi, Text-to-SQL deneniyor...")
+            try:
+                text_to_sql_result = self.text_to_sql.execute_sql_and_format_answer(
+                    soru,
+                    tc_kimlik_no,
+                    session_id
+                )
+
+                if text_to_sql_result.get('success'):
+                    cevap = text_to_sql_result['cevap']
+                    kaynak = "Veritabanı (Dinamik SQL)"
+
+                    logger.info(f"Text-to-SQL cevap buldu: {text_to_sql_result.get('sql', 'N/A')}")
+
+                    # Text-to-SQL cevabını kaydet
+                    self._save_to_database(tc_kimlik_no, soru, cevap, None, session_id)
+
+                    return {
+                        'success': True,
+                        'cevap': cevap,
+                        'kaynak': kaynak,
+                        'soru_tur_kod': 'TEXT_TO_SQL',
+                        'sql': text_to_sql_result.get('sql', '')
+                    }
+                else:
+                    logger.info(f"Text-to-SQL cevap bulamadı: {text_to_sql_result.get('error', 'Unknown')}")
+            except Exception as e:
+                logger.error(f"Text-to-SQL hatası (devam ediliyor): {str(e)}")
 
             # 4. DOKÜMANLARDAN ARA
             doc_answer = self.get_answer_from_documents(soru)

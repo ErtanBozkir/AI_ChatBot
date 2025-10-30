@@ -180,6 +180,18 @@ def ask_question(current_user):
         if use_documents:
             # Dokümanlardan cevapla (RAG)
             result = rag_engine.answer_from_documents(soru, tc_kimlik_no, session_id)
+
+            # RAG cevabını da SOHBETLER tablosuna kaydet
+            if result.get('success'):
+                try:
+                    query = """
+                        INSERT INTO SOHBETLER (TcKimlikNo, Soru, Cevap, SoruTurId, Tarih, SessionId)
+                        VALUES (?, ?, ?, NULL, GETDATE(), ?)
+                    """
+                    db.execute_non_query(query, (tc_kimlik_no, soru, result.get('cevap'), session_id))
+                    logger.info(f"RAG cevabı SOHBETLER tablosuna kaydedildi (SessionId: {session_id})")
+                except Exception as e:
+                    logger.error(f"RAG cevabı SOHBETLER'e kaydetme hatası: {str(e)}")
         else:
             # SQL'den cevapla (mevcut sistem)
             if session_id:
@@ -214,10 +226,17 @@ def get_chat_history(current_user):
             if 'Tarih' in item and isinstance(item['Tarih'], datetime):
                 item['Tarih'] = item['Tarih'].isoformat()
 
-        return jsonify({
+        response = jsonify({
             'success': True,
             'history': history
-        }), 200
+        })
+
+        # Cache'i devre dışı bırak - Her zaman yeni veri getir
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+
+        return response, 200
 
     except Exception as e:
         logger.error(f"Geçmiş getirme hatası: {str(e)}")
@@ -244,10 +263,17 @@ def get_sessions(current_user):
             if 'SonMesajTarihi' in session and isinstance(session['SonMesajTarihi'], datetime):
                 session['SonMesajTarihi'] = session['SonMesajTarihi'].isoformat()
 
-        return jsonify({
+        response = jsonify({
             'success': True,
             'sessions': sessions
-        }), 200
+        })
+
+        # ÖNEMLI: Cache'i devre dışı bırak - Her zaman yeni veri getir
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+
+        return response, 200
 
     except Exception as e:
         logger.error(f"Session listesi getirme hatası: {str(e)}")
@@ -494,6 +520,71 @@ def list_documents_admin(current_user):
 
     except Exception as e:
         logger.error(f"Doküman listesi hatası: {str(e)}")
+        return jsonify({'success': False, 'message': 'Bir hata oluştu'}), 500
+
+
+@app.route('/api/admin/documents/<int:file_id>/chunks', methods=['GET'])
+@admin_required
+def get_document_chunks(current_user, file_id):
+    """Belirli bir dokümanın chunk'larını getir (Admin only)"""
+    try:
+        query = """
+            SELECT ChunkId, ChunkIndex as ChunkSirasi, ChunkMetni, OlusturmaTarihi
+            FROM DOKUMAN_CHUNKS
+            WHERE DosyaId = ?
+            ORDER BY ChunkIndex ASC
+        """
+        chunks = db.execute_query(query, (file_id,))
+
+        for chunk in chunks:
+            if 'OlusturmaTarihi' in chunk and isinstance(chunk['OlusturmaTarihi'], datetime):
+                chunk['OlusturmaTarihi'] = chunk['OlusturmaTarihi'].isoformat()
+
+        return jsonify({'success': True, 'chunks': chunks, 'total': len(chunks)}), 200
+
+    except Exception as e:
+        logger.error(f"Chunk listesi hatası: {str(e)}")
+        return jsonify({'success': False, 'message': 'Bir hata oluştu'}), 500
+
+
+@app.route('/api/admin/documents/<int:file_id>', methods=['DELETE'])
+@admin_required
+def delete_document(current_user, file_id):
+    """Dokümanı sil (Admin only)"""
+    try:
+        # Dosya bilgisini al
+        query = "SELECT DosyaAdi, DosyaYolu FROM DOSYALAR WHERE DosyaId = ?"
+        file_info = db.execute_query(query, (file_id,))
+
+        if not file_info:
+            return jsonify({'success': False, 'message': 'Dosya bulunamadı'}), 404
+
+        # Database'den sil (soft delete)
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Dosyayı pasif yap
+            cursor.execute("UPDATE DOSYALAR SET AktifMi = 0 WHERE DosyaId = ?", (file_id,))
+
+            # Chunk'ları sil
+            cursor.execute("DELETE FROM DOKUMAN_CHUNKS WHERE DosyaId = ?", (file_id,))
+
+            conn.commit()
+
+        # Fiziksel dosyayı sil (opsiyonel)
+        file_path = file_info[0]['DosyaYolu']
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.info(f"Fiziksel dosya silindi: {file_path}")
+            except Exception as e:
+                logger.warning(f"Fiziksel dosya silinemedi: {str(e)}")
+
+        logger.info(f"Doküman silindi: {file_id}")
+        return jsonify({'success': True, 'message': 'Doküman başarıyla silindi'}), 200
+
+    except Exception as e:
+        logger.error(f"Doküman silme hatası: {str(e)}")
         return jsonify({'success': False, 'message': 'Bir hata oluştu'}), 500
 
 

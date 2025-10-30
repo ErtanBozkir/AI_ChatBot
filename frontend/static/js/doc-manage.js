@@ -135,6 +135,15 @@ const DocManage = {
                 this.deleteDocument(fileId);
             });
         });
+
+        // Attach view chunks event listeners
+        this.documentsList.querySelectorAll('.doc-view-chunks-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const fileId = e.currentTarget.dataset.fileId;
+                const fileName = e.currentTarget.dataset.fileName;
+                this.showChunksModal(fileId, fileName);
+            });
+        });
     },
 
     createDocumentCard(doc) {
@@ -167,11 +176,18 @@ const DocManage = {
                     ${statusIcon}
                     ${doc.IslenmeHatasi ? `<p class="error-text">${doc.IslenmeHatasi}</p>` : ''}
                 </div>
-                <button class="doc-delete-btn" data-file-id="${doc.DosyaId}" title="Sil">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                </button>
+                <div class="doc-actions">
+                    <button class="doc-view-chunks-btn" data-file-id="${doc.DosyaId}" data-file-name="${doc.DosyaAdi}" title="Chunk'ları Görüntüle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                    <button class="doc-delete-btn" data-file-id="${doc.DosyaId}" title="Sil">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
             </div>
         `;
     },
@@ -236,6 +252,79 @@ const DocManage = {
         if (this.modal) {
             this.modal.classList.remove('active');
             this.resetForm();
+        }
+    },
+
+    async showChunksModal(fileId, fileName) {
+        // Create or get chunks modal
+        let chunksModal = document.getElementById('chunks-modal');
+
+        if (!chunksModal) {
+            // Create modal if it doesn't exist
+            chunksModal = document.createElement('div');
+            chunksModal.id = 'chunks-modal';
+            chunksModal.className = 'modal';
+            chunksModal.innerHTML = `
+                <div class="modal-content chunks-modal-content">
+                    <div class="modal-header">
+                        <h3 id="chunks-modal-title">Doküman Chunk'ları</h3>
+                        <button class="modal-close">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="chunks-list" class="chunks-list"></div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(chunksModal);
+
+            // Add close button listener
+            chunksModal.querySelector('.modal-close').addEventListener('click', () => {
+                chunksModal.classList.remove('active');
+            });
+
+            // Close on outside click
+            chunksModal.addEventListener('click', (e) => {
+                if (e.target === chunksModal) {
+                    chunksModal.classList.remove('active');
+                }
+            });
+        }
+
+        // Update title
+        document.getElementById('chunks-modal-title').textContent = `Chunk'lar: ${fileName}`;
+
+        // Show modal
+        chunksModal.classList.add('active');
+
+        // Load chunks
+        const chunksList = document.getElementById('chunks-list');
+        chunksList.innerHTML = '<p class="loading">Yükleniyor...</p>';
+
+        try {
+            const response = await fetch(`/api/admin/documents/${fileId}/chunks`, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('chatbot_token')}`
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.chunks && data.chunks.length > 0) {
+                chunksList.innerHTML = data.chunks.map((chunk, index) => `
+                    <div class="chunk-item">
+                        <div class="chunk-header">
+                            <span class="chunk-number">Chunk #${chunk.ChunkSirasi}</span>
+                            <span class="chunk-date">${new Date(chunk.OlusturmaTarihi).toLocaleString('tr-TR')}</span>
+                        </div>
+                        <div class="chunk-text">${chunk.ChunkMetni}</div>
+                    </div>
+                `).join('');
+            } else {
+                chunksList.innerHTML = '<p class="no-documents">Bu doküman için chunk bulunamadı</p>';
+            }
+        } catch (error) {
+            console.error('Chunks loading error:', error);
+            chunksList.innerHTML = '<p class="error">Chunk\'lar yüklenirken bir hata oluştu</p>';
         }
     }
 };

@@ -21,9 +21,16 @@
             <div class="login-header">
                 <div class="company-logo">
                     <div class="logo-circle">
-                        <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
-                            <rect width="64" height="64" rx="16" fill="white" opacity="0.2"/>
-                            <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-size="28" font-weight="700" font-family="Inter">KNS</text>
+                        <img src="/static/images/logo.png?v=20251030" alt="KNS Otomotiv Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                        <svg style="display: none;" width="120" height="120" viewBox="0 0 120 120" fill="none">
+                            <rect width="120" height="120" rx="24" fill="url(#logo-gradient-login)"/>
+                            <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-size="48" font-weight="700" font-family="Inter">KNS</text>
+                            <defs>
+                                <linearGradient id="logo-gradient-login" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#0f2554"/>
+                                    <stop offset="100%" stop-color="#2d4d99"/>
+                                </linearGradient>
+                            </defs>
                         </svg>
                     </div>
                 </div>
@@ -64,13 +71,14 @@
                 <div class="sidebar-header">
                     <div class="sidebar-logo">
                         <div class="logo-icon">
-                            <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-                                <rect width="40" height="40" rx="10" fill="url(#logo-gradient)"/>
-                                <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-size="16" font-weight="700" font-family="Inter">KNS</text>
+                            <img src="/static/images/logo.png?v=20251030" alt="KNS Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                            <svg style="display: none;" width="56" height="56" viewBox="0 0 56 56" fill="none">
+                                <rect width="56" height="56" rx="12" fill="url(#logo-gradient)"/>
+                                <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-size="22" font-weight="700" font-family="Inter">KNS</text>
                                 <defs>
                                     <linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                                        <stop offset="0%" stop-color="#667eea"/>
-                                        <stop offset="100%" stop-color="#764ba2"/>
+                                        <stop offset="0%" stop-color="#0f2554"/>
+                                        <stop offset="100%" stop-color="#2d4d99"/>
                                     </linearGradient>
                                 </defs>
                             </svg>
@@ -159,7 +167,6 @@
                         <p>Size nasıl yardımcı olabilirim?</p>
                         <div class="quick-actions">
                             <button class="quick-btn" data-question="Kalan izin hakkım kaç gün?">İzin Hakkı</button>
-                            <button class="quick-btn" data-question="Maaşım ne zaman yatacak?">Maaş Bilgisi</button>
                             <button class="quick-btn" data-question="Üzerimdeki zimmetler neler?">Zimmet Bilgisi</button>
                             <button class="quick-btn" data-question="Eğitim almak istiyorum">Eğitim Talebi</button>
                         </div>

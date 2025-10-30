@@ -54,6 +54,73 @@ function generateSessionId() {
     });
 }
 
+// ============================================
+// Feedback Management
+// ============================================
+
+function getFeedbackKey(messageText) {
+    // Mesaj için unique key oluştur (ilk 100 karakter)
+    const text = messageText.substring(0, 100);
+    // Basit hash fonksiyonu
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+        const char = text.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+    }
+    const key = `feedback_${AppState.currentSessionId}_${hash}`;
+    console.log('[FEEDBACK DEBUG] getFeedbackKey:', {
+        sessionId: AppState.currentSessionId,
+        hash,
+        key,
+        messagePreview: text.substring(0, 50)
+    });
+    return key;
+}
+
+function saveFeedback(messageText, reactionType) {
+    const key = getFeedbackKey(messageText);
+    localStorage.setItem(key, reactionType);
+    console.log('[FEEDBACK DEBUG] saveFeedback:', { key, reactionType });
+    // Verify it was saved
+    const saved = localStorage.getItem(key);
+    console.log('[FEEDBACK DEBUG] Verification - saved value:', saved);
+}
+
+function getFeedback(messageText) {
+    const key = getFeedbackKey(messageText);
+    const value = localStorage.getItem(key);
+    console.log('[FEEDBACK DEBUG] getFeedback:', { key, value });
+    return value;
+}
+
+function clearSessionFeedbacks() {
+    // Session değiştiğinde eski feedback'leri temizle
+    const prefix = `feedback_${AppState.currentSessionId}_`;
+    console.log('[FEEDBACK DEBUG] clearSessionFeedbacks called:', {
+        currentSessionId: AppState.currentSessionId,
+        prefix
+    });
+
+    const keysToRemove = [];
+    const keysToKeep = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('feedback_')) {
+            if (!key.startsWith(prefix)) {
+                keysToRemove.push(key);
+            } else {
+                keysToKeep.push(key);
+            }
+        }
+    }
+
+    console.log('[FEEDBACK DEBUG] Feedback keys to remove:', keysToRemove);
+    console.log('[FEEDBACK DEBUG] Feedback keys to keep:', keysToKeep);
+
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+}
+
 function createNewSession() {
     const sessionId = generateSessionId();
     AppState.currentSessionId = sessionId;
@@ -262,7 +329,6 @@ function clearChatMessages() {
             <p>Size nasıl yardımcı olabilirim?</p>
             <div class="quick-actions">
                 <button class="quick-btn" data-question="Kalan izin hakkım kaç gün?">İzin Hakkı</button>
-                <button class="quick-btn" data-question="Maaşım ne zaman yatacak?">Maaş Bilgisi</button>
                 <button class="quick-btn" data-question="Üzerimdeki zimmetler neler?">Zimmet Bilgisi</button>
                 <button class="quick-btn" data-question="Eğitim almak istiyorum">Eğitim Talebi</button>
             </div>
@@ -334,7 +400,36 @@ function addMessage(text, isUser = false, source = null, confidence = null) {
     if (!isUser && source) {
         const sourceSpan = document.createElement('span');
         sourceSpan.className = 'message-source';
-        sourceSpan.textContent = `Kaynak: ${source}`;
+
+        // Check if source contains document names (starts with "Dokümanlar:")
+        if (source.includes('Dokümanlar:')) {
+            const parts = source.split('Dokümanlar:');
+            sourceSpan.innerHTML = `Kaynak: Dokümanlar: `;
+
+            // Extract document names and make them clickable
+            const docNames = parts[1].split(',').map(name => name.trim());
+
+            docNames.forEach((docName, index) => {
+                const docLink = document.createElement('a');
+                docLink.href = '#';
+                docLink.className = 'doc-link';
+                docLink.textContent = docName;
+                docLink.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    showDocumentDetails(docName);
+                });
+
+                sourceSpan.appendChild(docLink);
+
+                // Add comma if not last item
+                if (index < docNames.length - 1) {
+                    sourceSpan.appendChild(document.createTextNode(', '));
+                }
+            });
+        } else {
+            sourceSpan.textContent = `Kaynak: ${source}`;
+        }
+
         metaContainer.appendChild(sourceSpan);
     }
 
@@ -387,6 +482,14 @@ function addMessage(text, isUser = false, source = null, confidence = null) {
             handleReaction(messageDiv, 'negative', text);
         };
 
+        // Check if feedback already exists and restore state
+        const existingFeedback = getFeedback(text);
+        if (existingFeedback === 'positive') {
+            likeBtn.classList.add('active');
+        } else if (existingFeedback === 'negative') {
+            dislikeBtn.classList.add('active');
+        }
+
         reactionsDiv.appendChild(likeBtn);
         reactionsDiv.appendChild(dislikeBtn);
         content.appendChild(reactionsDiv);
@@ -402,10 +505,25 @@ function addMessage(text, isUser = false, source = null, confidence = null) {
 async function handleReaction(messageDiv, reactionType, messageText) {
     const reactions = messageDiv.querySelectorAll('.reaction-btn');
 
+    // Check if feedback already exists
+    const existingFeedback = getFeedback(messageText);
+    if (existingFeedback) {
+        console.log('Feedback already submitted:', existingFeedback);
+        // If user clicks the same button again, allow toggle-off
+        if (existingFeedback === reactionType) {
+            // Remove from localStorage
+            const key = getFeedbackKey(messageText);
+            localStorage.removeItem(key);
+            reactions.forEach(btn => btn.classList.remove('active'));
+            console.log('Feedback removed');
+        }
+        return; // Prevent duplicate submission
+    }
+
     // Toggle active state
     reactions.forEach(btn => {
         if (btn.classList.contains(reactionType)) {
-            btn.classList.toggle('active');
+            btn.classList.add('active');
         } else {
             btn.classList.remove('active');
         }
@@ -422,8 +540,13 @@ async function handleReaction(messageDiv, reactionType, messageText) {
         });
 
         console.log('Feedback sent successfully:', result);
+
+        // Save feedback state to localStorage after successful submission
+        saveFeedback(messageText, reactionType);
     } catch (error) {
         console.error('Feedback error:', error);
+        // Revert active state if API call failed
+        reactions.forEach(btn => btn.classList.remove('active'));
     }
 }
 
@@ -489,11 +612,17 @@ async function showHistoryModal() {
     const modal = document.getElementById('history-modal');
     const historyList = document.getElementById('history-list');
 
+    console.log('[DEBUG] showHistoryModal called');
+    console.log('[DEBUG] Modal element:', modal);
+    console.log('[DEBUG] History list element:', historyList);
+
     modal.classList.add('active');
     historyList.innerHTML = '<p class="loading">Yükleniyor...</p>';
 
     try {
+        console.log('[DEBUG] Calling /chat/sessions API...');
         const result = await apiCall('/chat/sessions?limit=20');
+        console.log('[DEBUG] API Response:', result);
 
         if (result.success && result.sessions.length > 0) {
             historyList.innerHTML = '';
@@ -538,7 +667,9 @@ async function showHistoryModal() {
 }
 
 async function loadSession(sessionId) {
-    console.log('Loading session:', sessionId);
+    console.log('[FEEDBACK DEBUG] ========================================');
+    console.log('[FEEDBACK DEBUG] loadSession called:', sessionId);
+    console.log('[FEEDBACK DEBUG] Current sessionId before load:', AppState.currentSessionId);
 
     try {
         showLoading(true);
@@ -548,16 +679,25 @@ async function loadSession(sessionId) {
 
         if (result.success && result.messages.length > 0) {
             // Set current session
+            console.log('[FEEDBACK DEBUG] Setting currentSessionId to:', sessionId);
             AppState.currentSessionId = sessionId;
             localStorage.setItem('chatbot_session_id', sessionId);
+            console.log('[FEEDBACK DEBUG] localStorage chatbot_session_id set to:', sessionId);
+
+            // DON'T clear feedback states - keep all sessions' feedback
+            // clearSessionFeedbacks(); // REMOVED - this was deleting other sessions' feedback!
+            console.log('[FEEDBACK DEBUG] Keeping all feedback states (not clearing)');
 
             // Clear current messages
             const messagesContainer = document.getElementById('chat-messages');
             messagesContainer.innerHTML = '';
             AppState.chatHistory = [];
 
+            console.log('[FEEDBACK DEBUG] Loading', result.messages.length, 'messages...');
+
             // Display all messages from the session
-            result.messages.forEach(msg => {
+            result.messages.forEach((msg, index) => {
+                console.log(`[FEEDBACK DEBUG] Loading message ${index + 1}/${result.messages.length}`);
                 // Add question (user message)
                 addMessage(msg.Soru, true);
 
@@ -570,7 +710,8 @@ async function loadSession(sessionId) {
                 });
             });
 
-            console.log(`Loaded ${result.messages.length} messages from session ${sessionId}`);
+            console.log(`[FEEDBACK DEBUG] Loaded ${result.messages.length} messages from session ${sessionId}`);
+            console.log('[FEEDBACK DEBUG] ========================================');
         }
     } catch (error) {
         console.error('Error loading session:', error);
@@ -653,6 +794,109 @@ function handleResize() {
     // Close mobile sidebar if window is resized to desktop size
     if (window.innerWidth > 768) {
         closeMobileSidebar();
+    }
+}
+
+// ============================================
+// Document Details Modal
+// ============================================
+
+async function showDocumentDetails(fileName) {
+    // Find document by name
+    try {
+        const response = await apiCall('/admin/documents');
+
+        if (response.success && response.documents) {
+            const doc = response.documents.find(d => d.DosyaAdi === fileName);
+
+            if (doc) {
+                // Use DocManage's showChunksModal if available
+                if (typeof DocManage !== 'undefined' && DocManage.showChunksModal) {
+                    DocManage.showChunksModal(doc.DosyaId, doc.DosyaAdi);
+                } else {
+                    // Fallback: create simple modal
+                    showSimpleChunksModal(doc.DosyaId, doc.DosyaAdi);
+                }
+            } else {
+                alert('Doküman bulunamadı');
+            }
+        }
+    } catch (error) {
+        console.error('Document details error:', error);
+        alert('Doküman bilgileri alınırken bir hata oluştu');
+    }
+}
+
+async function showSimpleChunksModal(fileId, fileName) {
+    // Create or get chunks modal
+    let chunksModal = document.getElementById('chunks-modal');
+
+    if (!chunksModal) {
+        // Create modal if it doesn't exist
+        chunksModal = document.createElement('div');
+        chunksModal.id = 'chunks-modal';
+        chunksModal.className = 'modal';
+        chunksModal.innerHTML = `
+            <div class="modal-content chunks-modal-content">
+                <div class="modal-header">
+                    <h3 id="chunks-modal-title">Doküman Chunk'ları</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="chunks-list" class="chunks-list"></div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(chunksModal);
+
+        // Add close button listener
+        chunksModal.querySelector('.modal-close').addEventListener('click', () => {
+            chunksModal.classList.remove('active');
+        });
+
+        // Close on outside click
+        chunksModal.addEventListener('click', (e) => {
+            if (e.target === chunksModal) {
+                chunksModal.classList.remove('active');
+            }
+        });
+    }
+
+    // Update title
+    document.getElementById('chunks-modal-title').textContent = `Chunk'lar: ${fileName}`;
+
+    // Show modal
+    chunksModal.classList.add('active');
+
+    // Load chunks
+    const chunksList = document.getElementById('chunks-list');
+    chunksList.innerHTML = '<p class="loading">Yükleniyor...</p>';
+
+    try {
+        const response = await fetch(`/api/admin/documents/${fileId}/chunks`, {
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('chatbot_token')}`
+            }
+        });
+
+        const data = await response.json();
+
+        if (data.success && data.chunks && data.chunks.length > 0) {
+            chunksList.innerHTML = data.chunks.map((chunk, index) => `
+                <div class="chunk-item">
+                    <div class="chunk-header">
+                        <span class="chunk-number">Chunk #${chunk.ChunkSirasi}</span>
+                        <span class="chunk-date">${new Date(chunk.OlusturmaTarihi).toLocaleString('tr-TR')}</span>
+                    </div>
+                    <div class="chunk-text">${chunk.ChunkMetni}</div>
+                </div>
+            `).join('');
+        } else {
+            chunksList.innerHTML = '<p class="no-documents">Bu doküman için chunk bulunamadı</p>';
+        }
+    } catch (error) {
+        console.error('Chunks loading error:', error);
+        chunksList.innerHTML = '<p class="error">Chunk\'lar yüklenirken bir hata oluştu</p>';
     }
 }
 

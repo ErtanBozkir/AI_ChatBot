@@ -19,7 +19,7 @@ class QuestionAnalyzer:
 
         # Soru türleri ve açıklamaları
         self.soru_turleri = {
-            'IZIN_HAKKI_SORGULA': 'Kullanıcının kalan yıllık izin hakkını sorgular',
+            'IZIN_HAKKI_SORGULA': 'SADECE kullanıcının KALAN yıllık izin hakkını sorgular (kaç gün izni kaldı). KULLANILAN izin geçmişi DEĞİL!',
             'STOK_BILGISI_SORGULA': 'Stok kodu için bakiye sorgular (stok_kod gerekli, depo_kod opsiyonel - belirtilmezse tüm depolar listelenir)',
             'MAAS_BORDRO_SORGULA': 'Maaş ve bordro bilgilerini sorgular (ay ve yıl opsiyonel)',
             'ZIMMET_SORGULA': 'Zimmet bilgilerini sorgular (ekipman_tipi opsiyonel)',
@@ -29,7 +29,7 @@ class QuestionAnalyzer:
             'AVANS_TALEP': 'Avans talepleri',
             'IT_DESTEK': 'BT destek talepleri',
             'GENEL_BILGI': 'Genel bilgilendirme soruları',
-            'BILINMIYOR': 'Tanımlanamayan sorular'
+            'BILINMIYOR': 'Tanımlanamayan sorular veya geçmiş kayıt sorguları (örn: kullanılan izinler, geçmiş talepler)'
         }
 
     def analyze_question(self, soru: str, tc_kimlik_no: str = None, sohbet_gecmisi: list = None) -> Dict[str, Any]:
@@ -172,7 +172,23 @@ Soru: "Kalan izin hakkım kaç gün?"
     "soru_tur_kod": "IZIN_HAKKI_SORGULA",
     "parametreler": {{}},
     "guven_skoru": 1.0,
-    "aciklama": "Yıllık izin sorgulama"
+    "aciklama": "Yıllık izin hakkı sorgulama (KALAN gün)"
+}}
+
+Soru: "Son 1 ayda kullandığım izinler"
+{{
+    "soru_tur_kod": "BILINMIYOR",
+    "parametreler": {{}},
+    "guven_skoru": 0.95,
+    "aciklama": "İzin geçmişi sorgusu - veritabanı gerekli"
+}}
+
+Soru: "Geçen ay hangi tarihlerde izin kullandım?"
+{{
+    "soru_tur_kod": "BILINMIYOR",
+    "parametreler": {{}},
+    "guven_skoru": 0.95,
+    "aciklama": "İzin geçmişi sorgusu - Text-to-SQL gerekli"
 }}
 
 Soru: "Eylül ayı bordrom ne kadar?"
@@ -201,10 +217,13 @@ Yeni Soru: "tüm depolardaki stoğu?"
     "aciklama": "Context'ten stok kodu alındı, tüm depolar sorgulanacak"
 }}
 
-ÖNEMLİ:
+ÖNEMLİ KURALLAR:
 - Stok kodlarını tam olarak çıkar (örn: "6-01PM-5245-AA")
 - Tarihleri YYYY-MM-DD formatına çevir
 - Ay isimlerini sayıya çevir (Ocak=1, Şubat=2, ...)
+- **KRİTİK:** "Kalan izin hakkım?" → IZIN_HAKKI_SORGULA, ama "Kullandığım izinler?" → BILINMIYOR
+- **KRİTİK:** "Son X ayda/günde kullandığım/aldığım izinler" → BILINMIYOR (geçmiş kayıt sorgusu)
+- IZIN_HAKKI_SORGULA SADECE "kaç gün kaldı" soruları içindir
 - Eğer emin değilsen guven_skoru'nu düşük tut
 - Yanıtın sadece JSON olsun, başka açıklama ekleme
 """
